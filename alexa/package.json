@@ -1,0 +1,20 @@
+{
+  "name": "homestead-alexa",
+  "version": "0.1.0",
+  "description": "Homestead Alexa skill — account-linked voice access to the Homestead API",
+  "type": "module",
+  "private": true,
+  "license": "ISC",
+  "scripts": {
+    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js"
+  },
+  "dependencies": {
+    "ask-sdk-core": "^2.14.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.7",
+    "@babel/preset-env": "^7.29.7",
+    "babel-jest": "^30.3.0",
+    "jest": "^30.4.2"
+  }
+}
