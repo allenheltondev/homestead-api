@@ -56,6 +56,9 @@ export function buildFeedPurchaseItem(fields) {
     unit: fields.unit,
     cost: fields.cost,
     vendor: fields.vendor,
+    // Optional per-flock (coop) attribution tag; dropped by the marshaller
+    // when undefined so legacy purchases stay untagged.
+    flock: fields.flock,
     purchasedAt: ts,
     createdAt,
   };

@@ -36,6 +36,8 @@ UTC strings so string ordering on a sort key matches chronological order.
 | Feed consumption -> id pointer | `FEEDUSEID#<id>` | `POINTER`              | —                            | —                                   | —        | —                                       |
 | Egg collection          | `EGG#<yyyy-mm>`     | `COLLECT#<ts>#<id>`        | —                            | —                                   | —        | —                                       |
 | Egg collection -> id pointer | `EGGID#<id>`   | `POINTER`                  | —                            | —                                   | —        | —                                       |
+| Health expense          | `HEALTHEXP#<yyyy-mm>` | `EXP#<ts>#<id>`         | —                            | —                                   | —        | —                                       |
+| Health expense -> id pointer | `HEALTHEXPID#<id>` | `POINTER`             | —                            | —                                   | —        | —                                       |
 
 ## Access pattern -> index map
 
@@ -58,6 +60,9 @@ UTC strings so string ordering on a sort key matches chronological order.
 | 15| Resolve an egg collection's key from its id (for DELETE) | GetItem | table | `pk = EGGID#<id>`, `sk = POINTER`                                          |
 | 16| List feed consumption for a month                    | Query     | table | `pk = FEEDUSE#<yyyy-mm>`, `begins_with(sk, "USE#")` (or `sk BETWEEN` for a ts range; optional `feedType` `FilterExpression`) |
 | 17| Resolve a feed consumption's key from its id (for DELETE) | GetItem | table | `pk = FEEDUSEID#<id>`, `sk = POINTER`                                  |
+| 18| List health expenses for a month                     | Query     | table | `pk = HEALTHEXP#<yyyy-mm>`, `begins_with(sk, "EXP#")` (or `sk BETWEEN` for a ts range; optional `category` `FilterExpression`) |
+| 19| Resolve a health expense's key from its id (for DELETE) | GetItem | table | `pk = HEALTHEXPID#<id>`, `sk = POINTER`                                |
+| 20| Deaths by cause in a month (mortality)               | Query     | GSI1  | `gsi1pk = EVENT#DEATH#<yyyy-mm>` (items pulled to read `cause`)            |
 
 ## Notes
 
@@ -129,5 +134,41 @@ UTC strings so string ordering on a sort key matches chronological order.
   timing and ignores out-of-lay months with feed usage but no eggs. Cost
   figures are null when `avgUnitCost` is null (no poultry weight purchased) or
   there are no lay-month dozens. No Scans.
+- **Health expenses** partition by month (`HEALTHEXP#<yyyy-mm>`); the sort
+  key `EXP#<ts>#<id>` (ts = `incurredAt` ISO) keeps a month's expenses
+  chronological. Fields: `category` (normalized lower-case), `cost`
+  (number >= 0), optional `animalRef`, optional `note`, `incurredAt` (ISO),
+  `createdAt`. `POST /health-expenses` accepts
+  `{ category, cost, animalRef?, note?, incurredAt? }`. A range list fans out
+  one `Query` per month partition (pattern 18), filtering an optional
+  `category` in-partition (no Scan). Like the other month-bucketed entities, an
+  id-pointer item (`pk = HEALTHEXPID#<id>`, `sk = POINTER`) backs scan-free
+  DELETE by bare id (pattern 19). Create publishes a `HealthExpenseRecorded`
+  event.
+- **Mortality / health analytics**
+  (`GET /stats/mortality`, `/stats/health`) are read-only aggregations.
+  `/stats/mortality` pulls the `EVENT#DEATH#<yyyy-mm>` items (pattern 20) for
+  the period and tallies `byCause` from each death event's `cause` attribute
+  (recorded by `POST /animals/{id}/death`); `lossRate` approximates deaths over
+  the average active herd size, using `activeCount + deaths` as the denominator
+  (no historical herd snapshots are kept). `/stats/health` sums
+  `HEALTHEXP#<yyyy-mm>` rows (pattern 18) into `totalSpend`, `byCategory`, and a
+  `perAnimal` figure (total spend ÷ current active animals). No Scans.
+- **Per-flock egg attribution.** Feed purchases and feed consumption accept an
+  optional `flock` string (the coop id) that is stored when provided; legacy
+  rows are unaffected and untagged. Eggs already carry `coop`, which is treated
+  as the flock key. `GET /stats/egg-cost` accepts an optional `flock` query that
+  restricts eggs to `coop == flock` and poultry feed to `flock == flock`; with
+  no `flock` the behavior (and payload shape) is unchanged.
+  `GET /stats/egg-cost/by-flock` returns one cost-per-dozen row per flock seen
+  in the period's egg collections (`{ flock, dozens, poultryFeedSpend,
+  costPerDozen, consumptionBasis }`). No Scans (egg + feed month partitions
+  only).
+- **Weekly digest** (`GET /stats/digest`, and the scheduled `DigestFunction`)
+  composes the existing stats aggregations over the trailing 7 days into a
+  `{ period, eggs, feedSpend, feedOnHandLbs, daysRemaining, births, deaths,
+  mortality, lines }` payload. The scheduled function always publishes a
+  `HomesteadDigest` event and, when `DIGEST_SENDER` + `DIGEST_RECIPIENT` are
+  configured, emails it via SES (failures never fail the schedule). No Scans.
 - `expiresAt` is reserved for TTL on any ephemeral records (e.g.
   idempotency entries); permanent records omit it.

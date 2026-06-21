@@ -34,6 +34,17 @@ function normalizeFeedType(value) {
   return trimmed;
 }
 
+// Normalizes an optional flock (coop id) tag. Returns the trimmed string, or
+// undefined when absent so legacy rows stay untagged. The flock keys per-flock
+// egg attribution; it matches the egg `coop` value.
+function normalizeFlock(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string" || value.trim().length === 0 || value.length > 128) {
+    throw new BadRequestError("flock must be a non-empty string (1-128 chars)");
+  }
+  return value.trim();
+}
+
 // Normalizes a usedAt/date value to an ISO timestamp. Empty -> now.
 function normalizeUsedAt(value) {
   if (value === undefined || value === null || value === "") {
@@ -58,7 +69,7 @@ export function validateFeedConsumptionCreate(body) {
     throw new BadRequestError("request body must be a JSON object");
   }
 
-  const { feedType, lbs, bags, bagWeightLbs, usedAt, date } = body;
+  const { feedType, lbs, bags, bagWeightLbs, usedAt, date, flock } = body;
   const normalizedType = normalizeFeedType(feedType);
 
   let resolvedLbs;
@@ -82,6 +93,7 @@ export function validateFeedConsumptionCreate(body) {
   return {
     feedType: normalizedType,
     lbs: resolvedLbs,
+    flock: normalizeFlock(flock),
     usedAt: normalizeUsedAt(usedAt ?? date),
   };
 }
@@ -152,11 +164,15 @@ function parseBound(value, label, inclusiveEnd) {
 // Maps a stored row to the API response shape. Internal key attributes
 // (pk/sk) never leak to clients.
 export function formatFeedConsumption(row) {
-  return {
+  const out = {
     id: row.id,
     feedType: row.feedType,
     lbs: row.lbs,
     usedAt: row.usedAt,
     createdAt: row.createdAt,
   };
+  // Per-flock attribution tag; included only when present so legacy/untagged
+  // usage rows round-trip unchanged.
+  if (row.flock !== undefined) out.flock = row.flock;
+  return out;
 }
