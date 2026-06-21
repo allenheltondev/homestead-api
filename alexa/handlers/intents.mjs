@@ -16,6 +16,8 @@ import {
   renderEggLogged,
   renderEggStats,
   renderEggCost,
+  renderFeedUsageLogged,
+  renderFeedInventory,
 } from "../lib/speech.mjs";
 import {
   buildBirthFields,
@@ -24,6 +26,8 @@ import {
   buildDeathFields,
   buildMoveFields,
   buildPeriodQuery,
+  buildFeedUsageFields,
+  slotValue,
 } from "../lib/slots.mjs";
 import {
   addHomeScreen,
@@ -32,13 +36,15 @@ import {
   addConfirmationScreen,
   addEggStatsScreen,
   addEggCostScreen,
+  addFeedInventoryScreen,
 } from "../lib/apl.mjs";
 
 const SKILL_NAME = "Homestead";
 const HELP_TEXT =
   "You can ask for your herd summary, ask how many animals you have, " +
   "log a feed purchase, log an egg collection, record a birth or death, " +
-  "move animals, or ask about your egg stats and cost. " +
+  "move animals, log feed you've fed out, ask how much feed you have left, " +
+  "or ask about your egg stats and cost. " +
   "What would you like to do?";
 
 function getIntentName(handlerInput) {
@@ -316,6 +322,55 @@ export const GetEggCostIntentHandler = {
   },
 };
 
+export const LogFeedUsageIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "LogFeedUsageIntent");
+  },
+  async handle(handlerInput) {
+    if (dialogIncomplete(handlerInput)) return delegate(handlerInput);
+
+    const intent = handlerInput.requestEnvelope.request.intent;
+    const fields = buildFeedUsageFields(intent);
+    try {
+      const api = createApiClient(handlerInput);
+      const result = await api.recordFeedUsage(fields);
+      const text = renderFeedUsageLogged(result ?? fields);
+      return addConfirmationScreen(handlerInput, "Feed usage logged", text)
+        .speak(text)
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't log that feed usage right now.",
+      );
+    }
+  },
+};
+
+export const GetFeedInventoryIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "GetFeedInventoryIntent");
+  },
+  async handle(handlerInput) {
+    const intent = handlerInput.requestEnvelope.request.intent;
+    const feedType = slotValue(intent, "feedType");
+    try {
+      const api = createApiClient(handlerInput);
+      const inventory = await api.getFeedInventory(feedType);
+      return addFeedInventoryScreen(handlerInput, inventory)
+        .speak(renderFeedInventory(inventory))
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't get your feed inventory right now.",
+      );
+    }
+  },
+};
+
 export const HelpIntentHandler = {
   canHandle(handlerInput) {
     return isIntent(handlerInput, "AMAZON.HelpIntent");
@@ -391,6 +446,8 @@ export const handlers = [
   MoveAnimalsIntentHandler,
   GetEggStatsIntentHandler,
   GetEggCostIntentHandler,
+  LogFeedUsageIntentHandler,
+  GetFeedInventoryIntentHandler,
   HelpIntentHandler,
   CancelAndStopIntentHandler,
   FallbackIntentHandler,

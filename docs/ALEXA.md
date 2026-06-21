@@ -247,3 +247,23 @@ manifest (`skill.json`):
 Preview/iterate on the documents in the **APL authoring tool**
 (developer.amazon.com → Alexa → APL) by pasting a document from
 `alexa/apl/documents.mjs` with a sample datasource.
+
+## Feed usage logging & inventory
+
+Two intents extend the feed workflow beyond purchases:
+
+- **LogFeedUsageIntent** (`LogFeedUsageIntentHandler`) — a dialog-managed write
+  intent (same `addDelegateDirective()` pattern as the other writes). Required
+  slots are `feedType` (the `FeedType` custom slot) and `amount`
+  (`AMAZON.NUMBER`); `unit` and `date` are optional. `buildFeedUsageFields`
+  (`alexa/lib/slots.mjs`) normalizes the spoken amount + unit into pounds
+  (defaulting to pounds, converting kg/ton) before `POST /feed-consumption`.
+  One-shot: "I fed 25 pounds of chicken food today"; partial: "I fed the
+  chickens" (Alexa elicits the missing slots, then confirms).
+- **GetFeedInventoryIntent** (`GetFeedInventoryIntentHandler`) — read-only,
+  optional `feedType` filter. Calls `GET /stats/feed-inventory` and speaks
+  on-hand pounds, days remaining, and the projected run-out date
+  (`renderFeedInventory`). On APL devices it renders the **Feed inventory**
+  screen (`feedInventoryDocument`): one labeled on-hand bar per feed type plus a
+  days-remaining readout (`addFeedInventoryScreen` /
+  `buildFeedInventoryDatasource`, gated on `Alexa.Presentation.APL`).

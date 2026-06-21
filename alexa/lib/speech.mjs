@@ -209,6 +209,72 @@ export function renderEggCost(cost) {
   return `${line}.`;
 }
 
+// Confirmation line after POST /feed-consumption. Reads back the amount fed
+// and the feed type ("Got it. I logged 25 pounds of chicken feed.").
+export function renderFeedUsageLogged(result) {
+  if (!result || typeof result !== "object") {
+    return "Got it. I logged that feed usage.";
+  }
+  const lbs = result.lbs;
+  const feedType = result.feedType ?? "feed";
+  if (lbs == null || !Number.isFinite(Number(lbs))) {
+    return `Got it. I logged some ${feedType} feed.`;
+  }
+  return `Got it. I logged ${pluralize(Number(lbs), "pound")} of ${feedType} feed.`;
+}
+
+// Speaks a projected run-out date as a natural phrase. Accepts an ISO date and
+// returns "around Friday, July 3rd" style text; falls back to the raw value.
+function speakRunOutDate(value) {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const parsed = new Date(`${value.trim()}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return value.trim();
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(parsed);
+}
+
+// Renders GET /stats/feed-inventory into spoken English: on-hand pounds, days
+// remaining at the current burn rate, and a projected run-out date. Handles a
+// single-type query and a whole-homestead rollup ("You have 120 pounds of
+// chicken feed left, about 12 days, running out around Friday, July 3rd.").
+export function renderFeedInventory(inventory) {
+  if (!inventory || typeof inventory !== "object") {
+    return "I couldn't read your feed inventory right now.";
+  }
+
+  // Single feed type: top-level onHandLbs/daysRemaining/runOutDate (+ feedType).
+  const items = Array.isArray(inventory.items) ? inventory.items : null;
+
+  const describe = (entry, label) => {
+    const onHand = Number(entry.onHandLbs ?? entry.lbs ?? 0);
+    const feedLabel = label ? `${label} feed` : "feed";
+    if (!(onHand > 0)) {
+      return `You're out of ${feedLabel}.`;
+    }
+    const parts = [`You have ${pluralize(onHand, "pound")} of ${feedLabel} left`];
+    const days = entry.daysRemaining;
+    if (days != null && Number.isFinite(Number(days))) {
+      parts.push(`about ${pluralize(Math.round(Number(days)), "day")}`);
+    }
+    const runOut = speakRunOutDate(entry.runOutDate);
+    if (runOut) parts.push(`running out around ${runOut}`);
+    return `${parts.join(", ")}.`;
+  };
+
+  if (items) {
+    if (items.length === 0) {
+      return "You don't have any feed on hand right now.";
+    }
+    return items.map((it) => describe(it, it.feedType)).join(" ");
+  }
+
+  return describe(inventory, inventory.feedType);
+}
+
 // Formats a dollar amount with the "$" sign and cents when present ("$2.10",
 // "$4"). Used by the egg-cost comparison where the symbol reads naturally.
 function speakDollars(amount) {

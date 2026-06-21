@@ -13,6 +13,7 @@ import {
   homeDocument,
   eggStatsDocument,
   eggCostDocument,
+  feedInventoryDocument,
   COLORS,
 } from "../apl/documents.mjs";
 
@@ -217,5 +218,59 @@ export function addEggCostScreen(handlerInput, cost) {
     "eggCostToken",
     eggCostDocument,
     buildEggCostDatasource(cost),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Feed inventory visual
+// ---------------------------------------------------------------------------
+
+// Pure datasource builder for the feed-inventory screen. Accepts either a
+// single-type inventory payload (top-level onHandLbs/daysRemaining/runOutDate)
+// or a rollup with an `items` array, and normalizes both into a `feeds` list of
+// { name, onHand, percent, daysRemaining } rows. Bar percents are scaled
+// relative to the largest on-hand amount so the fullest bar fills the row.
+export function buildFeedInventoryDatasource(inventory) {
+  const raw = Array.isArray(inventory?.items)
+    ? inventory.items
+    : inventory
+      ? [inventory]
+      : [];
+
+  const onHandOf = (e) => Number(e?.onHandLbs ?? e?.lbs ?? 0) || 0;
+  const max = raw.reduce((m, e) => Math.max(m, onHandOf(e)), 0);
+
+  const feeds = raw.map((e) => {
+    const onHand = onHandOf(e);
+    const percent = max > 0 ? Math.round((onHand / max) * 100) : 0;
+    const days = e?.daysRemaining;
+    const daysText =
+      days != null && Number.isFinite(Number(days))
+        ? `${plural(Math.round(Number(days)), "day")} left`
+        : "no usage data";
+    return {
+      name: capitalize(e?.feedType ?? "feed"),
+      onHand: `${onHand} lb`,
+      percent,
+      daysRemaining: daysText,
+    };
+  });
+
+  return {
+    data: {
+      title: "Feed Inventory",
+      subtitle: friendlyDate(),
+      feeds,
+    },
+  };
+}
+
+// Attaches the feed-inventory screen to the response (when supported).
+export function addFeedInventoryScreen(handlerInput, inventory) {
+  return render(
+    handlerInput,
+    "feedInventoryToken",
+    feedInventoryDocument,
+    buildFeedInventoryDatasource(inventory),
   );
 }

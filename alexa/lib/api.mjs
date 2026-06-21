@@ -107,6 +107,20 @@ export function createApiClient(handlerInput) {
     // POST /egg-collections — log an egg collection.
     recordEggCollection: (fields) =>
       request(token, "POST", "/egg-collections", fields),
+    // POST /feed-consumption — log feed fed to the animals so the server can
+    // draw down on-hand inventory.
+    recordFeedUsage: (fields) =>
+      request(token, "POST", "/feed-consumption", fields),
+    // GET /stats/feed-inventory — on-hand feed and projected run-out, optionally
+    // filtered to a single feed type.
+    getFeedInventory: (feedType) =>
+      request(
+        token,
+        "GET",
+        feedType
+          ? `/stats/feed-inventory?feedType=${encodeURIComponent(feedType)}`
+          : "/stats/feed-inventory",
+      ),
     // GET /stats/eggs — egg collection stats for an optional period.
     getEggStats: (query) =>
       request(token, "GET", joinQuery("/stats/eggs", query)),
