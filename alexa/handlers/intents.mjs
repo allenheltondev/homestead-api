@@ -44,6 +44,8 @@ import {
   addEggCostScreen,
   addFeedInventoryScreen,
 } from "../lib/apl.mjs";
+import { runAgent, PENDING_ACTION_KEY } from "../lib/agent.mjs";
+import { REGISTRY } from "../lib/tools.mjs";
 
 const SKILL_NAME = "Homestead";
 const HELP_TEXT =
@@ -494,14 +496,111 @@ export const CancelAndStopIntentHandler = {
   },
 };
 
+// Reads the raw spoken phrase off the request when Alexa surfaces it. On a
+// FallbackIntent there's no slot, but some locales/clients carry the recognized
+// utterance; fall back to undefined so runAgent speaks generic help.
+function rawUtterance(handlerInput) {
+  const request = handlerInput.requestEnvelope.request;
+  const value =
+    request?.intent?.slots?.query?.value ??
+    request?.inputTranscript ??
+    request?.utterance;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+// AMAZON.FallbackIntent — Alexa's built-in "no intent matched". Rather than
+// apologizing, hand whatever we have to the Nova Pro agent. When there's no
+// usable phrase, runAgent speaks a generic help prompt.
 export const FallbackIntentHandler = {
   canHandle(handlerInput) {
     return isIntent(handlerInput, "AMAZON.FallbackIntent");
   },
   handle(handlerInput) {
+    return runAgent({ handlerInput, utterance: rawUtterance(handlerInput) });
+  },
+};
+
+// CatchAllIntent — the SearchQuery catch-all that captures any free-form phrase
+// the structured intents didn't claim. Hands the `query` slot to the agent.
+export const CatchAllIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "CatchAllIntent");
+  },
+  handle(handlerInput) {
+    const intent = handlerInput.requestEnvelope.request.intent;
+    const utterance = slotValue(intent, "query");
+    return runAgent({ handlerInput, utterance });
+  },
+};
+
+// Reads (and clears) the pending write the agent stashed in session attributes.
+function takePendingAction(handlerInput) {
+  const attributes =
+    handlerInput.attributesManager.getSessionAttributes() || {};
+  const pending = attributes[PENDING_ACTION_KEY];
+  if (pending) {
+    delete attributes[PENDING_ACTION_KEY];
+    handlerInput.attributesManager.setSessionAttributes(attributes);
+  }
+  return pending;
+}
+
+// AMAZON.YesIntent — confirms a pending agent-proposed write. Executes the
+// matching write via lib/api.mjs and speaks a confirmation; clears the pending
+// action either way. With nothing pending, falls through to a help prompt.
+export const ConfirmActionYesIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "AMAZON.YesIntent");
+  },
+  async handle(handlerInput) {
+    const pending = takePendingAction(handlerInput);
+    if (!pending) {
+      return handlerInput.responseBuilder
+        .speak(`I don't have anything to confirm. ${HELP_TEXT}`)
+        .reprompt(HELP_TEXT)
+        .getResponse();
+    }
+
+    const entry = REGISTRY[pending.name];
+    if (!entry || entry.kind !== "write") {
+      return handlerInput.responseBuilder
+        .speak("Sorry, I couldn't complete that action.")
+        .getResponse();
+    }
+
+    try {
+      const api = createApiClient(handlerInput);
+      await entry.run(pending.args ?? {}, api);
+      return handlerInput.responseBuilder
+        .speak("Done. I've recorded that.")
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't complete that action right now.",
+      );
+    }
+  },
+};
+
+// AMAZON.NoIntent — cancels a pending agent-proposed write. Discards the
+// pending action and acknowledges; with nothing pending, offers help.
+export const ConfirmActionNoIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "AMAZON.NoIntent");
+  },
+  handle(handlerInput) {
+    const pending = takePendingAction(handlerInput);
+    if (!pending) {
+      return handlerInput.responseBuilder
+        .speak(`Okay. ${HELP_TEXT}`)
+        .reprompt(HELP_TEXT)
+        .getResponse();
+    }
     return handlerInput.responseBuilder
-      .speak(`Sorry, I didn't catch that. ${HELP_TEXT}`)
-      .reprompt(HELP_TEXT)
+      .speak("Okay, I won't do that. Is there anything else?")
+      .reprompt("Is there anything else?")
       .getResponse();
   },
 };
@@ -553,6 +652,13 @@ export const handlers = [
   GetWeeklyDigestIntentHandler,
   HelpIntentHandler,
   CancelAndStopIntentHandler,
+  // Yes/No confirm the agent's pending writes — register BEFORE the catch-all
+  // so a bare "yes"/"no" is claimed here rather than swept into the agent.
+  ConfirmActionYesIntentHandler,
+  ConfirmActionNoIntentHandler,
   FallbackIntentHandler,
+  // CatchAllIntent is the SearchQuery free-form fallback; keep it last so it
+  // only fires when no structured intent matched.
+  CatchAllIntentHandler,
   SessionEndedRequestHandler,
 ];
