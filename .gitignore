@@ -108,3 +108,6 @@ samconfig.local.toml
 
 # TernJS port file
 .tern-port
+
+# Agent worktrees (Claude Code orchestration scratch)
+.claude/
