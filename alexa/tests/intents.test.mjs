@@ -12,6 +12,8 @@ const recordFeedPurchase = jest.fn();
 const recordEggCollection = jest.fn();
 const getEggStats = jest.fn();
 const getEggCost = jest.fn();
+const recordFeedUsage = jest.fn();
+const getFeedInventory = jest.fn();
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -38,6 +40,8 @@ jest.unstable_mockModule("../lib/api.mjs", () => ({
     recordEggCollection,
     getEggStats,
     getEggCost,
+    recordFeedUsage,
+    getFeedInventory,
   }),
   ApiError,
   MissingTokenError,
@@ -55,6 +59,8 @@ const {
   MoveAnimalsIntentHandler,
   GetEggStatsIntentHandler,
   GetEggCostIntentHandler,
+  LogFeedUsageIntentHandler,
+  GetFeedInventoryIntentHandler,
   HelpIntentHandler,
   CancelAndStopIntentHandler,
   FallbackIntentHandler,
@@ -428,6 +434,91 @@ describe("egg read intents + APL gating", () => {
     );
     expect(res.speech).toContain("cheaper than the $4 store price");
     expect(res.directives).toHaveLength(1);
+  });
+});
+
+describe("LogFeedUsageIntent (dialog-delegated write)", () => {
+  test("delegates while the dialog is incomplete", async () => {
+    const res = await LogFeedUsageIntentHandler.handle(
+      handlerInput(intentRequest("LogFeedUsageIntent", {}, "IN_PROGRESS")),
+    );
+    expect(res.delegated).toBe(true);
+    expect(recordFeedUsage).not.toHaveBeenCalled();
+  });
+
+  test("posts lbs + feedType when COMPLETED and confirms", async () => {
+    recordFeedUsage.mockResolvedValue({ lbs: 25, feedType: "chicken" });
+    const res = await LogFeedUsageIntentHandler.handle(
+      handlerInput(
+        intentRequest("LogFeedUsageIntent", {
+          feedType: { value: "chicken" },
+          amount: { value: "25" },
+        }),
+        { apl: true },
+      ),
+    );
+    expect(recordFeedUsage).toHaveBeenCalledWith({
+      feedType: "chicken",
+      lbs: 25,
+    });
+    expect(res.delegated).toBe(false);
+    expect(res.speech).toContain("25 pounds of chicken feed");
+    // Confirmation screen on APL devices.
+    expect(res.directives).toHaveLength(1);
+  });
+
+  test("surfaces auth errors on COMPLETED", async () => {
+    recordFeedUsage.mockRejectedValue(new MissingTokenError());
+    const res = await LogFeedUsageIntentHandler.handle(
+      handlerInput(
+        intentRequest("LogFeedUsageIntent", {
+          feedType: { value: "chicken" },
+          amount: { value: "10" },
+        }),
+      ),
+    );
+    expect(res.linkAccount).toBe(true);
+  });
+});
+
+describe("GetFeedInventoryIntent + APL gating", () => {
+  test("speaks inventory and renders APL on capable devices", async () => {
+    getFeedInventory.mockResolvedValue({
+      feedType: "chicken",
+      onHandLbs: 120,
+      daysRemaining: 12,
+      runOutDate: "2026-07-03",
+    });
+    const res = await GetFeedInventoryIntentHandler.handle(
+      handlerInput(
+        intentRequest("GetFeedInventoryIntent", { feedType: { value: "chicken" } }),
+        { apl: true },
+      ),
+    );
+    expect(getFeedInventory).toHaveBeenCalledWith("chicken");
+    expect(res.speech).toContain("120 pounds of chicken feed left");
+    expect(res.directives).toHaveLength(1);
+    expect(res.directives[0].type).toBe(
+      "Alexa.Presentation.APL.RenderDocument",
+    );
+  });
+
+  test("stays voice-only on headless devices", async () => {
+    getFeedInventory.mockResolvedValue({ items: [] });
+    const res = await GetFeedInventoryIntentHandler.handle(
+      handlerInput(intentRequest("GetFeedInventoryIntent"), { apl: false }),
+    );
+    expect(getFeedInventory).toHaveBeenCalledWith(undefined);
+    expect(res.directives).toHaveLength(0);
+    expect(res.speech).toBeTruthy();
+  });
+
+  test("prompts to link account on a 401", async () => {
+    getFeedInventory.mockRejectedValue(new ApiError(401, "Unauthorized"));
+    const res = await GetFeedInventoryIntentHandler.handle(
+      handlerInput(intentRequest("GetFeedInventoryIntent")),
+    );
+    expect(res.linkAccount).toBe(true);
   });
 });
 

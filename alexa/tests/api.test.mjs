@@ -139,6 +139,45 @@ describe("createApiClient", () => {
     );
   });
 
+  test("recordFeedUsage POSTs lbs + feedType to /feed-consumption", async () => {
+    const fetchMock = mockFetch(201, { id: "fc1", lbs: 25, feedType: "chicken" });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.recordFeedUsage({ lbs: 25, feedType: "chicken" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.example.test/v1/feed-consumption");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ lbs: 25, feedType: "chicken" });
+  });
+
+  test("getFeedInventory GETs /stats/feed-inventory with a feedType filter", async () => {
+    const fetchMock = mockFetch(200, { onHandLbs: 120 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getFeedInventory("chicken");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(
+      "https://api.example.test/v1/stats/feed-inventory?feedType=chicken",
+    );
+    expect(init.method).toBe("GET");
+  });
+
+  test("getFeedInventory omits the query when no feedType is given", async () => {
+    const fetchMock = mockFetch(200, { items: [] });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getFeedInventory();
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.example.test/v1/stats/feed-inventory",
+    );
+  });
+
   test("throws MissingTokenError when unlinked", async () => {
     global.fetch = mockFetch(200, {});
     const api = createApiClient(handlerInputWithToken());

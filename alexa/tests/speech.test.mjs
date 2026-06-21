@@ -6,6 +6,8 @@ import {
   renderEggLogged,
   renderEggStats,
   renderEggCost,
+  renderFeedUsageLogged,
+  renderFeedInventory,
   __testables,
 } from "../lib/speech.mjs";
 
@@ -192,5 +194,67 @@ describe("renderEggCost", () => {
   test("speakDollars formats cents and whole dollars", () => {
     expect(__testables.speakDollars(4)).toBe("$4");
     expect(__testables.speakDollars(2.1)).toBe("$2.10");
+  });
+});
+
+describe("renderFeedUsageLogged", () => {
+  test("reads back amount and feed type", () => {
+    const speech = renderFeedUsageLogged({ lbs: 25, feedType: "chicken" });
+    expect(speech).toContain("25 pounds");
+    expect(speech).toContain("chicken feed");
+  });
+
+  test("singular pound", () => {
+    expect(renderFeedUsageLogged({ lbs: 1, feedType: "goat" })).toContain(
+      "1 pound of goat feed",
+    );
+  });
+
+  test("falls back without an amount", () => {
+    expect(renderFeedUsageLogged({ feedType: "hay" })).toMatch(/some hay feed/);
+  });
+
+  test("null payload", () => {
+    expect(renderFeedUsageLogged(null)).toMatch(/logged that feed usage/);
+  });
+});
+
+describe("renderFeedInventory", () => {
+  test("single type: speaks on-hand, days remaining, and run-out date", () => {
+    const speech = renderFeedInventory({
+      feedType: "chicken",
+      onHandLbs: 120,
+      daysRemaining: 12,
+      runOutDate: "2026-07-03",
+    });
+    expect(speech).toContain("120 pounds of chicken feed left");
+    expect(speech).toContain("about 12 days");
+    expect(speech).toContain("running out around");
+    expect(speech).toContain("July 3");
+  });
+
+  test("rollup with items joins each feed type", () => {
+    const speech = renderFeedInventory({
+      items: [
+        { feedType: "chicken", onHandLbs: 100, daysRemaining: 10 },
+        { feedType: "goat", onHandLbs: 40, daysRemaining: 4 },
+      ],
+    });
+    expect(speech).toContain("100 pounds of chicken feed left");
+    expect(speech).toContain("40 pounds of goat feed left");
+  });
+
+  test("says you're out when nothing on hand", () => {
+    expect(
+      renderFeedInventory({ feedType: "hay", onHandLbs: 0 }),
+    ).toMatch(/out of hay feed/);
+  });
+
+  test("empty rollup", () => {
+    expect(renderFeedInventory({ items: [] })).toMatch(/don't have any feed/);
+  });
+
+  test("null payload", () => {
+    expect(renderFeedInventory(null)).toMatch(/couldn't read/);
   });
 });

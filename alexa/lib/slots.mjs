@@ -170,6 +170,38 @@ export function buildMoveFields(intent) {
   return fields;
 }
 
+// Approximate pound-equivalents for the non-pound units the feed-usage intent
+// accepts. Used to normalize a spoken amount into pounds before posting.
+const UNIT_TO_LBS = {
+  lb: 1,
+  kg: 2.20462,
+  ton: 2000,
+};
+
+// Builds the POST /feed-consumption body for the dialog-delegated
+// LogFeedUsageIntent. Converts the spoken amount + unit into pounds (defaulting
+// to pounds when no unit is given) so the server always receives a `lbs` field,
+// alongside the feed type and an optional date.
+export function buildFeedUsageFields(intent) {
+  const feedType = textSlot(intent, "feedType");
+  const amount = parseCount(slotValue(intent, "amount"));
+  const unit = normalizeUnit(slotValue(intent, "unit")) ?? "lb";
+
+  const fields = {};
+  if (feedType) fields.feedType = feedType;
+  if (Number.isFinite(amount)) {
+    const factor = UNIT_TO_LBS[unit] ?? 1;
+    const lbs = amount * factor;
+    // Keep round numbers clean while still allowing fractional kg/ton results.
+    fields.lbs = Number.isInteger(lbs) ? lbs : Math.round(lbs * 100) / 100;
+  }
+
+  const date = slotValue(intent, "date");
+  if (isIsoDate(date)) fields.date = date.trim();
+
+  return fields;
+}
+
 // Reads an optional free-text period slot ("this month", "this week") used by
 // the read-only egg stats/cost intents.
 export function buildPeriodQuery(intent) {

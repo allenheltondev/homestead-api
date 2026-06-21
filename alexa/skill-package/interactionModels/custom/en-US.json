@@ -206,6 +206,42 @@
             "what's my egg cost {period}",
             "are my eggs cheaper than the store"
           ]
+        },
+        {
+          "name": "LogFeedUsageIntent",
+          "slots": [
+            { "name": "feedType", "type": "FeedType" },
+            { "name": "amount", "type": "AMAZON.NUMBER" },
+            { "name": "unit", "type": "AMAZON.SearchQuery" },
+            { "name": "date", "type": "AMAZON.DATE" }
+          ],
+          "samples": [
+            "I fed {amount} pounds of {feedType} food {date}",
+            "I fed {amount} pounds of {feedType} feed",
+            "I fed {amount} {unit} of {feedType} feed {date}",
+            "log {amount} pounds of {feedType} feed",
+            "record that I fed {amount} pounds of {feedType} feed",
+            "I used {amount} pounds of {feedType} feed",
+            "I fed the chickens",
+            "I fed the animals",
+            "log feed usage",
+            "record feed usage"
+          ]
+        },
+        {
+          "name": "GetFeedInventoryIntent",
+          "slots": [
+            { "name": "feedType", "type": "FeedType" }
+          ],
+          "samples": [
+            "how much feed do I have left",
+            "how much {feedType} feed is left",
+            "how much {feedType} food do I have",
+            "when will I run out of {feedType} food",
+            "when will I run out of feed",
+            "what's my feed inventory",
+            "feed inventory"
+          ]
         }
       ]
     },
@@ -370,6 +406,39 @@
               "elicitationRequired": false
             }
           ]
+        },
+        {
+          "name": "LogFeedUsageIntent",
+          "confirmationRequired": true,
+          "prompts": { "confirmation": "Confirm.Intent.LogFeedUsage" },
+          "slots": [
+            {
+              "name": "feedType",
+              "type": "FeedType",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.feedUsageType" }
+            },
+            {
+              "name": "amount",
+              "type": "AMAZON.NUMBER",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.feedAmount" }
+            },
+            {
+              "name": "unit",
+              "type": "AMAZON.SearchQuery",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            },
+            {
+              "name": "date",
+              "type": "AMAZON.DATE",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            }
+          ]
         }
       ]
     },
@@ -450,6 +519,24 @@
         "id": "Confirm.Intent.MoveAnimals",
         "variations": [
           { "type": "PlainText", "value": "Move {group} to {pasture}. Should I do that?" }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.feedUsageType",
+        "variations": [
+          { "type": "PlainText", "value": "What kind of feed did you feed out? For example chicken, cattle, or goat." }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.feedAmount",
+        "variations": [
+          { "type": "PlainText", "value": "How much did you feed, in pounds?" }
+        ]
+      },
+      {
+        "id": "Confirm.Intent.LogFeedUsage",
+        "variations": [
+          { "type": "PlainText", "value": "{amount} pounds of {feedType} feed. Should I log it?" }
         ]
       }
     ]

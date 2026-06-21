@@ -340,6 +340,106 @@ function statScreen(extraItems = []) {
 // Egg stats screen: total eggs, dozens, and per-day rate as three stat tiles.
 export const eggStatsDocument = statScreen();
 
+// Feed inventory screen: a header plus one row per feed type, each with a
+// labeled on-hand bar (width bound to payload's percent) and a days-remaining
+// readout. Uses the shared dark palette via inline hex like the egg screens.
+export const feedInventoryDocument = {
+  type: "APL",
+  version: "2024.2",
+  theme: "dark",
+  mainTemplate: {
+    parameters: ["payload"],
+    items: [
+      {
+        type: "Container",
+        width: "100vw",
+        height: "100vh",
+        direction: "column",
+        backgroundColor: COLORS.background,
+        paddingLeft: "6vw",
+        paddingRight: "6vw",
+        paddingTop: "5vh",
+        paddingBottom: "5vh",
+        items: [
+          {
+            type: "Text",
+            text: "${payload.data.title}",
+            fontSize: "46dp",
+            fontWeight: "700",
+            color: COLORS.text,
+          },
+          {
+            type: "Text",
+            text: "${payload.data.subtitle}",
+            fontSize: "22dp",
+            color: COLORS.muted,
+            paddingBottom: "3vh",
+          },
+          {
+            type: "Sequence",
+            grow: 1,
+            width: "100%",
+            data: "${payload.data.feeds}",
+            scrollDirection: "vertical",
+            item: {
+              type: "Container",
+              width: "100%",
+              paddingTop: "1.4vh",
+              paddingBottom: "1.4vh",
+              items: [
+                {
+                  type: "Container",
+                  direction: "row",
+                  width: "100%",
+                  alignItems: "center",
+                  items: [
+                    {
+                      type: "Text",
+                      text: "${data.name}",
+                      color: COLORS.text,
+                      fontSize: "26dp",
+                      grow: 1,
+                    },
+                    {
+                      type: "Text",
+                      text: "${data.onHand}",
+                      color: COLORS.primary,
+                      fontSize: "26dp",
+                      fontWeight: "700",
+                    },
+                  ],
+                },
+                {
+                  type: "Frame",
+                  width: "100%",
+                  height: "14dp",
+                  backgroundColor: COLORS.surface,
+                  borderRadius: "7dp",
+                  marginTop: "0.8vh",
+                  item: {
+                    type: "Frame",
+                    width: "${data.percent}%",
+                    height: "14dp",
+                    backgroundColor: COLORS.primary,
+                    borderRadius: "7dp",
+                  },
+                },
+                {
+                  type: "Text",
+                  text: "${data.daysRemaining}",
+                  color: COLORS.muted,
+                  fontSize: "20dp",
+                  paddingTop: "0.6vh",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  },
+};
+
 // Egg cost screen: cost-per-dozen vs store price tiles plus a cheaper /
 // more-expensive badge bound to payload.data.badge.
 export const eggCostDocument = statScreen([

@@ -9,8 +9,14 @@ import {
   buildConfirmationData,
   addHerdSummaryScreen,
   addConfirmationScreen,
+  buildFeedInventoryDatasource,
+  addFeedInventoryScreen,
 } from "../lib/apl.mjs";
-import { COLORS, herdScreenDocument } from "../apl/documents.mjs";
+import {
+  COLORS,
+  herdScreenDocument,
+  feedInventoryDocument,
+} from "../apl/documents.mjs";
 
 function handlerInput({ apl }) {
   const directives = [];
@@ -129,6 +135,71 @@ describe("egg add*Screen gating", () => {
     }).getResponse();
     expect(input._directives).toHaveLength(1);
     expect(input._directives[0].token).toBe("eggCostToken");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feed inventory screen
+// ---------------------------------------------------------------------------
+
+describe("buildFeedInventoryDatasource", () => {
+  test("maps a rollup with items into feed rows and scales bar percents", () => {
+    const ds = buildFeedInventoryDatasource({
+      items: [
+        { feedType: "chicken", onHandLbs: 100, daysRemaining: 10 },
+        { feedType: "goat", onHandLbs: 50, daysRemaining: 5 },
+      ],
+    });
+    expect(ds.data.title).toBe("Feed Inventory");
+    expect(ds.data.feeds).toEqual([
+      { name: "Chicken", onHand: "100 lb", percent: 100, daysRemaining: "10 days left" },
+      { name: "Goat", onHand: "50 lb", percent: 50, daysRemaining: "5 days left" },
+    ]);
+  });
+
+  test("wraps a single-type payload into one row", () => {
+    const ds = buildFeedInventoryDatasource({
+      feedType: "hay",
+      onHandLbs: 200,
+      daysRemaining: 20,
+    });
+    expect(ds.data.feeds).toHaveLength(1);
+    expect(ds.data.feeds[0].name).toBe("Hay");
+    expect(ds.data.feeds[0].percent).toBe(100);
+  });
+
+  test("labels missing usage data", () => {
+    const ds = buildFeedInventoryDatasource({ feedType: "grain", onHandLbs: 0 });
+    expect(ds.data.feeds[0].daysRemaining).toBe("no usage data");
+    expect(ds.data.feeds[0].percent).toBe(0);
+  });
+});
+
+describe("feed inventory add*Screen gating", () => {
+  test("renders a RenderDocument directive when supported", () => {
+    const input = handlerInput({ apl: true });
+    addFeedInventoryScreen(input, {
+      feedType: "chicken",
+      onHandLbs: 120,
+      daysRemaining: 12,
+    }).getResponse();
+    expect(input._directives).toHaveLength(1);
+    expect(input._directives[0]).toMatchObject({
+      type: "Alexa.Presentation.APL.RenderDocument",
+      token: "feedInventoryToken",
+      document: feedInventoryDocument,
+    });
+  });
+
+  test("is a no-op on headless devices", () => {
+    const input = handlerInput({ apl: false });
+    addFeedInventoryScreen(input, { feedType: "chicken", onHandLbs: 1 }).getResponse();
+    expect(input._directives).toHaveLength(0);
+  });
+
+  test("feedInventoryDocument is a valid APL document", () => {
+    expect(feedInventoryDocument.type).toBe("APL");
+    expect(feedInventoryDocument.mainTemplate.parameters).toContain("payload");
   });
 });
 

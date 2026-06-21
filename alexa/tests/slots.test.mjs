@@ -6,6 +6,7 @@ import {
   buildDeathFields,
   buildMoveFields,
   buildPeriodQuery,
+  buildFeedUsageFields,
   __testables,
 } from "../lib/slots.mjs";
 
@@ -176,6 +177,67 @@ describe("buildMoveFields", () => {
         }),
       ),
     ).toEqual({ group: "the goats", pasture: "south field", date: "2026-06-21" });
+  });
+});
+
+describe("buildFeedUsageFields", () => {
+  test("defaults to pounds when no unit is given", () => {
+    const fields = buildFeedUsageFields(
+      intentWith({
+        feedType: {
+          value: "layers",
+          resolutions: {
+            resolutionsPerAuthority: [
+              { values: [{ value: { name: "chicken" } }] },
+            ],
+          },
+        },
+        amount: { value: "25" },
+        date: { value: "2026-06-21" },
+      }),
+    );
+    expect(fields).toEqual({ feedType: "chicken", lbs: 25, date: "2026-06-21" });
+  });
+
+  test("converts kilograms to pounds", () => {
+    const fields = buildFeedUsageFields(
+      intentWith({
+        feedType: { value: "goat" },
+        amount: { value: "10" },
+        unit: { value: "kilograms" },
+      }),
+    );
+    expect(fields.feedType).toBe("goat");
+    expect(fields.lbs).toBeCloseTo(22.05, 2);
+  });
+
+  test("converts tons to pounds", () => {
+    const fields = buildFeedUsageFields(
+      intentWith({
+        feedType: { value: "cattle" },
+        amount: { value: "1" },
+        unit: { value: "ton" },
+      }),
+    );
+    expect(fields).toEqual({ feedType: "cattle", lbs: 2000 });
+  });
+
+  test("partial intent omits amount when absent", () => {
+    const fields = buildFeedUsageFields(
+      intentWith({ feedType: { value: "chicken" } }),
+    );
+    expect(fields).toEqual({ feedType: "chicken" });
+  });
+
+  test("drops an invalid date", () => {
+    const fields = buildFeedUsageFields(
+      intentWith({
+        feedType: { value: "hay" },
+        amount: { value: "50" },
+        date: { value: "tomorrow" },
+      }),
+    );
+    expect(fields).toEqual({ feedType: "hay", lbs: 50 });
   });
 });
 
