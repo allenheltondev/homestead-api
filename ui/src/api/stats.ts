@@ -1,5 +1,7 @@
 import type { ApiFetch } from '../auth/useApiFetch';
 import type {
+  EggCostStats,
+  EggStats,
   FeedStats,
   HerdStats,
   LifecycleStats,
@@ -37,6 +39,27 @@ export async function getFeedStats(
   period?: string,
 ): Promise<FeedStats> {
   return apiFetch<FeedStats>('/stats/feed', { query: { period } });
+}
+
+// period is YYYY-MM, YYYY, or a keyword like `week`/`month`; defaults
+// server-side to the current month.
+export async function getEggStats(
+  apiFetch: ApiFetch,
+  period?: string,
+): Promise<EggStats> {
+  return apiFetch<EggStats>('/stats/eggs', { query: { period } });
+}
+
+// Cost-per-dozen analytics. storePrice (USD per dozen) is optional and lets
+// the server compute savings versus buying from the store.
+export async function getEggCost(
+  apiFetch: ApiFetch,
+  period?: string,
+  storePrice?: number,
+): Promise<EggCostStats> {
+  return apiFetch<EggCostStats>('/stats/egg-cost', {
+    query: { period, storePricePerDozen: storePrice },
+  });
 }
 
 export async function getStatsSummary(apiFetch: ApiFetch): Promise<StatsSummary> {

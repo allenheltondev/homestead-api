@@ -39,6 +39,9 @@ function NavItems({
       <NavLink to="/feed" className={className} onClick={onNavigate}>
         Feed
       </NavLink>
+      <NavLink to="/eggs" className={className} onClick={onNavigate}>
+        Eggs
+      </NavLink>
     </>
   );
 }

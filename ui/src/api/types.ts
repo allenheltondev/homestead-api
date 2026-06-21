@@ -164,6 +164,11 @@ export interface FeedPurchase {
   type: string;
   quantity: number;
   unit: FeedUnit;
+  // Feed purchased by the bag carries bag count + per-bag weight; the server
+  // computes totalLbs (bags * bagWeightLbs). Older records may omit these.
+  bags?: number;
+  bagWeightLbs?: number;
+  totalLbs?: number;
   cost: number;
   vendor: string;
   purchasedAt: string;
@@ -174,19 +179,45 @@ export interface FeedPurchaseListResponse {
   feed_purchases: FeedPurchase[];
 }
 
+// Feed-by-the-bag purchase: bags * bagWeightLbs -> totalLbs (computed server
+// side). cost and date are optional; feedType identifies the feed.
 export interface CreateFeedPurchaseRequest {
-  type: string;
-  quantity: number;
-  unit: FeedUnit;
-  cost: number;
-  vendor: string;
-  purchasedAt?: string;
+  feedType: string;
+  bags: number;
+  bagWeightLbs: number;
+  cost?: number;
+  date?: string;
 }
 
 export interface FeedPurchaseFilters {
   from?: string;
   to?: string;
   type?: string;
+}
+
+// --- Eggs ---------------------------------------------------------------
+
+export interface EggCollection {
+  id: string;
+  count: number;
+  date: string;
+  coop: string | null;
+  createdAt: string;
+}
+
+export interface EggCollectionListResponse {
+  egg_collections: EggCollection[];
+}
+
+export interface CreateEggCollectionRequest {
+  count: number;
+  date?: string;
+  coop?: string;
+}
+
+export interface EggCollectionFilters {
+  from?: string;
+  to?: string;
 }
 
 // --- Stats --------------------------------------------------------------
@@ -235,6 +266,29 @@ export interface FeedStats {
   byType: Record<string, FeedTypeBreakdown>;
 }
 
+// GET /stats/eggs?period= — egg production totals for a period.
+export interface EggStats {
+  period: string;
+  totalEggs: number;
+  dozens: number;
+  days: number;
+  perDay: number;
+}
+
+// GET /stats/egg-cost?period=&storePricePerDozen= — cost-per-dozen analytics
+// comparing your poultry-feed spend against a store price.
+export interface EggCostStats {
+  period: string;
+  eggs: number;
+  dozens: number;
+  poultryFeedSpend: number;
+  costPerDozen: number;
+  costPerEgg: number;
+  storePricePerDozen: number;
+  savingsPerDozen: number;
+  cheaperThanStore: boolean;
+}
+
 // GET /stats/summary — one composed dashboard payload.
 export interface SummaryHerdSpecies {
   species: string;
@@ -257,5 +311,7 @@ export interface StatsSummary {
   births: { thisMonth: number; thisYear: number };
   deaths: { thisMonth: number; thisYear: number };
   feed: { thisMonthSpend: number; thisMonthQuantity: number };
+  eggs: { thisWeek: number; thisMonth: number };
+  eggCost: { costPerDozenThisMonth: number; cheaperThanStore: boolean };
   pastures: { total: number; occupancy: SummaryOccupancy[] };
 }
