@@ -1,0 +1,2 @@
+# Domain layer: DynamoDB data access + business rules per entity.
+# Each feature stream adds <entity>.mjs here. See docs/DATA_MODEL.md.
