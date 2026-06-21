@@ -14,12 +14,14 @@ interface FormState {
   count: string;
   date: string;
   coop: string;
+  flock: string;
 }
 
 const EMPTY: FormState = {
   count: '',
   date: '',
   coop: '',
+  flock: '',
 };
 
 // Logs an egg collection. count is required; date defaults server-side to
@@ -51,6 +53,8 @@ export default function RegisterEggCollectionForm({
     if (form.date) payload.date = form.date;
     const coop = form.coop.trim();
     if (coop.length > 0) payload.coop = coop;
+    const flock = form.flock.trim();
+    if (flock.length > 0) payload.flock = flock;
 
     onSubmit(payload);
   };
@@ -83,6 +87,21 @@ export default function RegisterEggCollectionForm({
           />
         </label>
       </div>
+
+      <label className="block">
+        <span className="field-label">Flock</span>
+        <input
+          type="text"
+          className="input"
+          value={form.flock}
+          onChange={(e) => update('flock', e.target.value)}
+          placeholder="Optional — e.g. layers, pullets"
+          disabled={busy}
+        />
+        <span className="field-hint mt-1 block">
+          Attributes eggs to a flock for per-flock cost analytics.
+        </span>
+      </label>
 
       <label className="block">
         <span className="field-label">Collected on</span>

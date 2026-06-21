@@ -187,6 +187,8 @@ export interface CreateFeedPurchaseRequest {
   bagWeightLbs: number;
   cost?: number;
   date?: string;
+  // Optional flock attribution, used by per-flock egg-cost analytics.
+  flock?: string;
 }
 
 export interface FeedPurchaseFilters {
@@ -221,6 +223,8 @@ export interface CreateFeedConsumptionRequest {
   bags?: number;
   bagWeightLbs?: number;
   date?: string;
+  // Optional flock attribution, used by per-flock egg-cost analytics.
+  flock?: string;
 }
 
 export interface FeedConsumptionFilters {
@@ -247,6 +251,8 @@ export interface CreateEggCollectionRequest {
   count: number;
   date?: string;
   coop?: string;
+  // Optional flock attribution, used by per-flock egg-cost analytics.
+  flock?: string;
 }
 
 export interface EggCollectionFilters {
@@ -391,4 +397,99 @@ export interface StatsSummary {
   eggs: { thisWeek: number; thisMonth: number };
   eggCost: { costPerDozenThisMonth: number; cheaperThanStore: boolean };
   pastures: { total: number; occupancy: SummaryOccupancy[] };
+}
+
+// --- Health expenses ----------------------------------------------------
+
+export interface HealthExpense {
+  id: string;
+  category: string;
+  cost: number;
+  animalRef: string | null;
+  note: string | null;
+  date: string;
+  createdAt: string;
+}
+
+export interface HealthExpenseListResponse {
+  health_expenses: HealthExpense[];
+}
+
+// POST /health-expenses — log a health/vet expense. category and cost are
+// required; animalRef, note, and date are optional (date defaults to today).
+export interface CreateHealthExpenseRequest {
+  category: string;
+  cost: number;
+  animalRef?: string;
+  note?: string;
+  date?: string;
+}
+
+export interface HealthExpenseFilters {
+  from?: string;
+  to?: string;
+  category?: string;
+}
+
+// GET /stats/health?period= — health spend totals for a period.
+export interface HealthCategoryBreakdown {
+  category: string;
+  cost: number;
+  count: number;
+}
+
+export interface HealthPerAnimalRow {
+  animalRef: string;
+  cost: number;
+  count: number;
+}
+
+export interface HealthStats {
+  period: string;
+  totalSpend: number;
+  byCategory: HealthCategoryBreakdown[];
+  perAnimal: HealthPerAnimalRow[];
+}
+
+// GET /stats/mortality?period= — deaths-by-cause plus an overall loss rate.
+export interface MortalityCauseBreakdown {
+  cause: string;
+  count: number;
+}
+
+export interface MortalityStats {
+  period: string;
+  totalDeaths: number;
+  byCause: MortalityCauseBreakdown[];
+  // Fraction (0..1) of the herd lost in the period.
+  lossRate: number;
+}
+
+// GET /stats/digest — a "this week" rollup with headline numbers and a set of
+// human-readable summary lines.
+export interface DigestMortality {
+  totalDeaths: number;
+  lossRate: number;
+}
+
+export interface DigestStats {
+  period: string;
+  eggs: number;
+  feedSpend: number;
+  feedOnHandLbs: number;
+  daysRemaining: number | null;
+  births: number;
+  deaths: number;
+  mortality: DigestMortality;
+  lines: string[];
+}
+
+// GET /stats/egg-cost/by-flock?period= — per-flock cost-per-dozen analytics.
+export interface EggCostByFlockRow {
+  flock: string;
+  dozens: number;
+  poultryFeedSpend: number;
+  costPerDozen: number;
+  // Refined consumption-basis cost-per-dozen, present when usage is logged.
+  consumptionBasis?: number;
 }

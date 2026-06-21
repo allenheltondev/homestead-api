@@ -1,11 +1,15 @@
 import type { ApiFetch } from '../auth/useApiFetch';
 import type {
+  DigestStats,
+  EggCostByFlockRow,
   EggCostStats,
   EggStats,
   FeedInventoryStats,
   FeedStats,
+  HealthStats,
   HerdStats,
   LifecycleStats,
+  MortalityStats,
   PastureOccupancyStats,
   StatsSummary,
 } from './types';
@@ -71,4 +75,36 @@ export async function getStatsSummary(apiFetch: ApiFetch): Promise<StatsSummary>
 // projected run-out date) derived from purchases and logged consumption.
 export async function getFeedInventory(apiFetch: ApiFetch): Promise<FeedInventoryStats> {
   return apiFetch<FeedInventoryStats>('/stats/feed-inventory');
+}
+
+// GET /stats/health?period= — health/vet spend totals: overall, by category,
+// and per animal. period is YYYY-MM, YYYY, or a keyword; defaults server-side.
+export async function getHealth(
+  apiFetch: ApiFetch,
+  period?: string,
+): Promise<HealthStats> {
+  return apiFetch<HealthStats>('/stats/health', { query: { period } });
+}
+
+// GET /stats/mortality?period= — deaths-by-cause plus an overall loss rate.
+export async function getMortality(
+  apiFetch: ApiFetch,
+  period?: string,
+): Promise<MortalityStats> {
+  return apiFetch<MortalityStats>('/stats/mortality', { query: { period } });
+}
+
+// GET /stats/digest — a weekly rollup with headline numbers and summary lines.
+export async function getDigest(apiFetch: ApiFetch): Promise<DigestStats> {
+  return apiFetch<DigestStats>('/stats/digest');
+}
+
+// GET /stats/egg-cost/by-flock?period= — per-flock cost-per-dozen analytics.
+export async function getEggCostByFlock(
+  apiFetch: ApiFetch,
+  period?: string,
+): Promise<EggCostByFlockRow[]> {
+  return apiFetch<EggCostByFlockRow[]>('/stats/egg-cost/by-flock', {
+    query: { period },
+  });
 }

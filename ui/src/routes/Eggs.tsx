@@ -6,16 +6,18 @@ import {
   deleteEggCollection,
   listEggCollections,
 } from '../api/eggs';
-import { getEggCost } from '../api/stats';
+import { getEggCost, getEggCostByFlock } from '../api/stats';
 import type {
   CreateEggCollectionRequest,
   EggCollection,
+  EggCostByFlockRow,
   EggCostStats,
 } from '../api/types';
 import Modal from '../components/Modal';
 import RegisterEggCollectionForm from '../components/RegisterEggCollectionForm';
 import EggsChart from '../components/EggsChart';
 import EggCostCard from '../components/EggCostCard';
+import EggCostByFlockTable from '../components/EggCostByFlockTable';
 import { formatShortDate } from '../components/format';
 
 const DEFAULT_STORE_PRICE = 4;
@@ -26,6 +28,7 @@ export default function Eggs(): ReactElement {
   const [error, setError] = useState<string | null>(null);
 
   const [eggCost, setEggCost] = useState<EggCostStats | null>(null);
+  const [byFlock, setByFlock] = useState<EggCostByFlockRow[] | null>(null);
 
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -58,6 +61,15 @@ export default function Eggs(): ReactElement {
       })
       .catch(() => {
         if (!cancelled) setEggCost(null);
+      });
+
+    // Best-effort: per-flock cost-per-dozen breakdown.
+    getEggCostByFlock(apiFetch)
+      .then((res) => {
+        if (!cancelled) setByFlock(res);
+      })
+      .catch(() => {
+        if (!cancelled) setByFlock(null);
       });
 
     return () => {
@@ -141,6 +153,17 @@ export default function Eggs(): ReactElement {
           )}
         </section>
       </div>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold text-foreground">Cost per dozen by flock</h2>
+        {byFlock === null ? (
+          <p className="rounded-md bg-muted text-muted-foreground text-sm text-center py-6">
+            Per-flock cost analytics are unavailable right now.
+          </p>
+        ) : (
+          <EggCostByFlockTable rows={byFlock} />
+        )}
+      </section>
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-sm">
