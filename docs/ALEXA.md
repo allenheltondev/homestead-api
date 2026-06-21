@@ -20,22 +20,27 @@ alexa/
 
 ## Intents
 
-| Intent                     | API call             | Spoken result                                   |
-| -------------------------- | -------------------- | ----------------------------------------------- |
-| `GetHerdSummaryIntent`     | `GET /stats/summary` | Herd by species, births/deaths + feed spend MTD |
-| `GetHerdCountIntent`       | `GET /stats/herd`    | Total + active animals, counts by species       |
-| `RecordBirthIntent`        | `POST /births`       | Confirms the recorded birth                     |
-| `RecordFeedPurchaseIntent` | `POST /feed-purchases` | Confirms the recorded purchase                |
+| Intent                   | API call                | Spoken result                                   |
+| ------------------------ | ----------------------- | ----------------------------------------------- |
+| `GetHerdSummaryIntent`   | `GET /stats/summary`    | Herd by species, births/deaths + feed spend MTD |
+| `GetHerdCountIntent`     | `GET /stats/herd`       | Total + active animals, counts by species       |
+| `GetEggStatsIntent`      | `GET /stats/eggs`       | Eggs collected, dozens, per-day (+ APL screen)  |
+| `GetEggCostIntent`       | `GET /stats/egg-cost`   | Cost per dozen vs store price (+ APL screen)    |
+| `LogFeedPurchaseIntent`  | `POST /feed-purchases`  | Confirms bags × weight = total                  |
+| `LogEggCollectionIntent` | `POST /egg-collections` | Confirms the logged egg count                   |
+| `RecordBirthIntent`      | `POST /births`          | Confirms the recorded birth                     |
+| `RecordDeathIntent`      | `POST /deaths`          | Confirms the recorded death                     |
+| `MoveAnimalsIntent`      | `POST /moves`           | Confirms the move                               |
 
 Plus the standard `LaunchRequest`, `AMAZON.HelpIntent`,
-`AMAZON.Cancel/StopIntent`, `AMAZON.FallbackIntent`, and
-`SessionEndedRequest` handlers, and a catch-all error handler.
+`AMAZON.Cancel/StopIntent`, `AMAZON.FallbackIntent`,
+`AMAZON.NavigateHomeIntent`, and `SessionEndedRequest` handlers, and a
+catch-all error handler.
 
-`RecordBirthIntent` requires a `species` slot; `RecordFeedPurchaseIntent`
-requires `type`, `quantity`, `unit`, and `cost` (with `vendor` defaulting to
-`unknown`). Missing required slots are re-prompted rather than sent to the
-API. Unit synonyms ("pounds", "bales", "kilograms", ...) normalize to the
-API's canonical units (`lb`, `bale`, `kg`, ...).
+The write intents are **dialog-managed**: Alexa elicits and confirms the
+required slots before the handler runs (see "Interaction model & dialog
+auto-delegation" below). Missing required slots are collected by Alexa rather
+than the handler re-prompting.
 
 ## How the skill authenticates to the API
 
@@ -152,3 +157,58 @@ app client id at deploy time via the `AlexaUserPoolClientId` template
 parameter (CI/deploy var `ALEXA_USER_POOL_CLIENT_ID`) so access tokens
 minted for the Alexa client pass `client_id` validation. If the Alexa
 skill reuses the dashboard app client, no extra config is needed.
+
+## Interaction model & dialog auto-delegation
+
+The versioned interaction model lives at
+`alexa/skill-package/interactionModels/custom/en-US.json` (invocation name
+**"homestead"**). Upload it to the skill via the ASK CLI / developer console;
+it is not deployed by the SAM stack. It defines a `FeedType` custom slot type
+(synonyms: chicken/layer/poultry → `chicken`, cow/cattle → `cattle`, goat,
+sheep, pig, horse, plus hay/grain), the read intents, and the dialog-managed
+write intents.
+
+### Dialog-managed (multi-turn) write intents
+
+The model's `dialog` block sets `delegationStrategy: ALWAYS` and marks each
+write intent's required slots `elicitationRequired` with elicitation prompts,
+plus intent-level `confirmationRequired` with a read-back prompt. Alexa drives
+the back-and-forth; the skill just delegates until the dialog is done:
+
+```js
+if (handlerInput.requestEnvelope.request.dialogState !== "COMPLETED") {
+  return handlerInput.responseBuilder.addDelegateDirective().getResponse();
+}
+// COMPLETED: build fields from filled slots and call the API.
+```
+
+| Intent                  | Required slots (elicited)        | Optional slots          | API call                |
+| ----------------------- | -------------------------------- | ----------------------- | ----------------------- |
+| `LogFeedPurchaseIntent` | `bags`, `bagWeight`, `feedType`  | `cost`, `date`          | `POST /feed-purchases`  |
+| `LogEggCollectionIntent`| `count`                          | `date`, `coop`          | `POST /egg-collections` |
+| `RecordBirthIntent`     | `species`, `count`               | `dam`, `sire`, `date`   | `POST /births`          |
+| `RecordDeathIntent`     | `animalRef`                      | `cause`, `date`         | `POST /deaths`          |
+| `MoveAnimalsIntent`     | `group`, `pasture`               | `date`                  | `POST /moves`           |
+
+`LogFeedPurchaseIntent` confirms by reading back the computed total
+("4 fifty-pound bags, 200 pounds of chicken feed — add it?"). The skill passes
+`{bags, bagWeightLbs, feedType}` to the API verbatim — the server computes the
+total weight (the slot builder computes nothing). Each write intent supports
+both one-shot utterances ("I bought {bags} {bagWeight} pound bags of {feedType}
+food {date}") and partial ones ("I bought food") that kick off elicitation.
+
+Spoken quantities: prefer `AMAZON.NUMBER`, but the slot builders map a literal
+"a dozen" → 12 (and "half dozen" → 6, "two dozen" → 24) when the word comes
+through as text.
+
+### Read intents + APL egg screens
+
+`GetEggStatsIntent` and `GetEggCostIntent` take an optional free-text `period`
+slot. They speak a rendered summary (`renderEggStats`, `renderEggCost` — the
+cost line includes a break-even comparison to the store price) and, on
+APL-capable devices only, render a visual screen. `lib/apl.mjs` gates every
+`add*Screen` on `Alexa.Presentation.APL` in the device's supported interfaces
+(same pattern as the rest of the skill), so headless devices (Echo Dot, phone)
+stay voice-only. The `eggStatsDocument` / `eggCostDocument` templates
+(`apl/documents.mjs`) use the dark "homestead green" palette; the cost screen
+shows a cheaper / pricier badge.

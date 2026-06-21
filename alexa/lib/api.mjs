@@ -96,8 +96,30 @@ export function createApiClient(handlerInput) {
     getHerd: () => request(token, "GET", "/stats/herd"),
     // POST /births — create an animal + BIRTH event.
     recordBirth: (fields) => request(token, "POST", "/births", fields),
-    // POST /feed-purchases — record a feed purchase.
+    // POST /deaths — record an animal death.
+    recordDeath: (fields) => request(token, "POST", "/deaths", fields),
+    // POST /moves — move a group of animals to a pasture.
+    moveAnimals: (fields) => request(token, "POST", "/moves", fields),
+    // POST /feed-purchases — record a feed purchase. The body carries bags +
+    // per-bag weight; the server computes the total weight.
     recordFeedPurchase: (fields) =>
       request(token, "POST", "/feed-purchases", fields),
+    // POST /egg-collections — log an egg collection.
+    recordEggCollection: (fields) =>
+      request(token, "POST", "/egg-collections", fields),
+    // GET /stats/eggs — egg collection stats for an optional period.
+    getEggStats: (query) =>
+      request(token, "GET", joinQuery("/stats/eggs", query)),
+    // GET /stats/egg-cost — cost-per-dozen vs store price for an optional
+    // period.
+    getEggCost: (query) =>
+      request(token, "GET", joinQuery("/stats/egg-cost", query)),
   };
+}
+
+// Appends a query string ({ period } only, when set) to a path.
+function joinQuery(path, query) {
+  if (!query || !query.period) return path;
+  const params = new URLSearchParams({ period: query.period });
+  return `${path}?${params.toString()}`;
 }

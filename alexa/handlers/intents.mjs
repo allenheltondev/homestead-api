@@ -13,13 +13,26 @@ import {
   renderHerdCount,
   renderBirthConfirmation,
   renderFeedConfirmation,
+  renderEggLogged,
+  renderEggStats,
+  renderEggCost,
 } from "../lib/speech.mjs";
-import { buildBirthFields, buildFeedFields } from "../lib/slots.mjs";
+import {
+  buildBirthFields,
+  buildFeedFields,
+  buildEggFields,
+  buildDeathFields,
+  buildMoveFields,
+  buildPeriodQuery,
+} from "../lib/slots.mjs";
+import { addEggStatsScreen, addEggCostScreen } from "../lib/apl.mjs";
 
 const SKILL_NAME = "Homestead";
 const HELP_TEXT =
   "You can ask for your herd summary, ask how many animals you have, " +
-  "record a birth, or record a feed purchase. What would you like to do?";
+  "log a feed purchase, log an egg collection, record a birth or death, " +
+  "move animals, or ask about your egg stats and cost. " +
+  "What would you like to do?";
 
 function getIntentName(handlerInput) {
   return handlerInput.requestEnvelope.request.intent?.name;
@@ -28,6 +41,19 @@ function getIntentName(handlerInput) {
 function isIntent(handlerInput, name) {
   const request = handlerInput.requestEnvelope.request;
   return request.type === "IntentRequest" && request.intent?.name === name;
+}
+
+// True while Alexa is still collecting/confirming slots for a dialog-managed
+// intent. Until the dialog reports COMPLETED we hand control back to Alexa
+// (auto-delegation) rather than calling the API.
+function dialogIncomplete(handlerInput) {
+  return handlerInput.requestEnvelope.request.dialogState !== "COMPLETED";
+}
+
+// Returns the auto-delegate directive response Alexa drives the multi-turn
+// dialog with.
+function delegate(handlerInput) {
+  return handlerInput.responseBuilder.addDelegateDirective().getResponse();
 }
 
 // Speaks a "please link your account" prompt with a LinkAccount card. Used
@@ -104,23 +130,68 @@ export const GetHerdCountIntentHandler = {
   },
 };
 
+export const LogFeedPurchaseIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "LogFeedPurchaseIntent");
+  },
+  async handle(handlerInput) {
+    if (dialogIncomplete(handlerInput)) return delegate(handlerInput);
+
+    const intent = handlerInput.requestEnvelope.request.intent;
+    const fields = buildFeedFields(intent);
+    try {
+      const api = createApiClient(handlerInput);
+      const purchase = await api.recordFeedPurchase(fields);
+      return handlerInput.responseBuilder
+        .speak(renderFeedConfirmation(purchase ?? fields))
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't record that feed purchase right now.",
+      );
+    }
+  },
+};
+
+export const LogEggCollectionIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "LogEggCollectionIntent");
+  },
+  async handle(handlerInput) {
+    if (dialogIncomplete(handlerInput)) return delegate(handlerInput);
+
+    const intent = handlerInput.requestEnvelope.request.intent;
+    const fields = buildEggFields(intent);
+    try {
+      const api = createApiClient(handlerInput);
+      const result = await api.recordEggCollection(fields);
+      return handlerInput.responseBuilder
+        .speak(renderEggLogged(result ?? fields))
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't log that egg collection right now.",
+      );
+    }
+  },
+};
+
 export const RecordBirthIntentHandler = {
   canHandle(handlerInput) {
     return isIntent(handlerInput, "RecordBirthIntent");
   },
   async handle(handlerInput) {
-    const intent = handlerInput.requestEnvelope.request.intent;
-    const built = buildBirthFields(intent);
-    if (!built.ok) {
-      return handlerInput.responseBuilder
-        .speak(built.reprompt)
-        .reprompt(built.reprompt)
-        .getResponse();
-    }
+    if (dialogIncomplete(handlerInput)) return delegate(handlerInput);
 
+    const intent = handlerInput.requestEnvelope.request.intent;
+    const fields = buildBirthFields(intent);
     try {
       const api = createApiClient(handlerInput);
-      const result = await api.recordBirth(built.fields);
+      const result = await api.recordBirth(fields);
       return handlerInput.responseBuilder
         .speak(renderBirthConfirmation(result))
         .getResponse();
@@ -134,31 +205,99 @@ export const RecordBirthIntentHandler = {
   },
 };
 
-export const RecordFeedPurchaseIntentHandler = {
+export const RecordDeathIntentHandler = {
   canHandle(handlerInput) {
-    return isIntent(handlerInput, "RecordFeedPurchaseIntent");
+    return isIntent(handlerInput, "RecordDeathIntent");
   },
   async handle(handlerInput) {
-    const intent = handlerInput.requestEnvelope.request.intent;
-    const built = buildFeedFields(intent);
-    if (!built.ok) {
-      return handlerInput.responseBuilder
-        .speak(built.reprompt)
-        .reprompt(built.reprompt)
-        .getResponse();
-    }
+    if (dialogIncomplete(handlerInput)) return delegate(handlerInput);
 
+    const intent = handlerInput.requestEnvelope.request.intent;
+    const fields = buildDeathFields(intent);
     try {
       const api = createApiClient(handlerInput);
-      const purchase = await api.recordFeedPurchase(built.fields);
+      await api.recordDeath(fields);
       return handlerInput.responseBuilder
-        .speak(renderFeedConfirmation(purchase))
+        .speak("Got it. I recorded that death.")
         .getResponse();
     } catch (err) {
       return speakApiError(
         handlerInput,
         err,
-        "Sorry, I couldn't record that feed purchase right now.",
+        "Sorry, I couldn't record that death right now.",
+      );
+    }
+  },
+};
+
+export const MoveAnimalsIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "MoveAnimalsIntent");
+  },
+  async handle(handlerInput) {
+    if (dialogIncomplete(handlerInput)) return delegate(handlerInput);
+
+    const intent = handlerInput.requestEnvelope.request.intent;
+    const fields = buildMoveFields(intent);
+    try {
+      const api = createApiClient(handlerInput);
+      await api.moveAnimals(fields);
+      return handlerInput.responseBuilder
+        .speak(
+          `Got it. I moved ${fields.group ?? "the animals"} to ${
+            fields.pasture ?? "the pasture"
+          }.`,
+        )
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't move those animals right now.",
+      );
+    }
+  },
+};
+
+export const GetEggStatsIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "GetEggStatsIntent");
+  },
+  async handle(handlerInput) {
+    const intent = handlerInput.requestEnvelope.request.intent;
+    try {
+      const api = createApiClient(handlerInput);
+      const stats = await api.getEggStats(buildPeriodQuery(intent));
+      return addEggStatsScreen(handlerInput, stats)
+        .speak(renderEggStats(stats))
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't get your egg stats right now.",
+      );
+    }
+  },
+};
+
+export const GetEggCostIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "GetEggCostIntent");
+  },
+  async handle(handlerInput) {
+    const intent = handlerInput.requestEnvelope.request.intent;
+    try {
+      const api = createApiClient(handlerInput);
+      const cost = await api.getEggCost(buildPeriodQuery(intent));
+      return addEggCostScreen(handlerInput, cost)
+        .speak(renderEggCost(cost))
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't get your egg cost right now.",
       );
     }
   },
@@ -232,8 +371,13 @@ export const handlers = [
   LaunchRequestHandler,
   GetHerdSummaryIntentHandler,
   GetHerdCountIntentHandler,
+  LogFeedPurchaseIntentHandler,
+  LogEggCollectionIntentHandler,
   RecordBirthIntentHandler,
-  RecordFeedPurchaseIntentHandler,
+  RecordDeathIntentHandler,
+  MoveAnimalsIntentHandler,
+  GetEggStatsIntentHandler,
+  GetEggCostIntentHandler,
   HelpIntentHandler,
   CancelAndStopIntentHandler,
   FallbackIntentHandler,

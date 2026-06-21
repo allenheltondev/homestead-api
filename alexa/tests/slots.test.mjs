@@ -2,6 +2,10 @@ import {
   slotValue,
   buildBirthFields,
   buildFeedFields,
+  buildEggFields,
+  buildDeathFields,
+  buildMoveFields,
+  buildPeriodQuery,
   __testables,
 } from "../lib/slots.mjs";
 
@@ -12,14 +16,14 @@ function intentWith(slots) {
 describe("slotValue", () => {
   test("prefers entity-resolution canonical value", () => {
     const intent = intentWith({
-      sex: {
-        value: "girl",
+      feedType: {
+        value: "layers",
         resolutions: {
-          resolutionsPerAuthority: [{ values: [{ value: { name: "female" } }] }],
+          resolutionsPerAuthority: [{ values: [{ value: { name: "chicken" } }] }],
         },
       },
     });
-    expect(slotValue(intent, "sex")).toBe("female");
+    expect(slotValue(intent, "feedType")).toBe("chicken");
   });
 
   test("falls back to the spoken value", () => {
@@ -44,100 +48,144 @@ describe("normalizeUnit", () => {
   });
 });
 
-describe("buildBirthFields", () => {
-  test("requires species", () => {
-    const result = buildBirthFields(intentWith({}));
-    expect(result.ok).toBe(false);
-    expect(result.reprompt).toMatch(/species/i);
+describe("parseCount", () => {
+  test("parses numeric strings", () => {
+    expect(__testables.parseCount("12")).toBe(12);
+    expect(__testables.parseCount(7)).toBe(7);
   });
-
-  test("maps species plus optional fields", () => {
-    const result = buildBirthFields(
-      intentWith({
-        species: { value: "goat" },
-        name: { value: "Daisy" },
-        sex: { value: "female" },
-        dob: { value: "2026-06-21" },
-      }),
-    );
-    expect(result.ok).toBe(true);
-    expect(result.fields).toEqual({
-      species: "goat",
-      name: "Daisy",
-      sex: "female",
-      dob: "2026-06-21",
-    });
+  test("maps spoken quantities", () => {
+    expect(__testables.parseCount("a dozen")).toBe(12);
+    expect(__testables.parseCount("DOZEN")).toBe(12);
+    expect(__testables.parseCount("half dozen")).toBe(6);
+    expect(__testables.parseCount("two dozen")).toBe(24);
   });
-
-  test("drops an invalid dob", () => {
-    const result = buildBirthFields(
-      intentWith({ species: { value: "cow" }, dob: { value: "yesterday" } }),
-    );
-    expect(result.ok).toBe(true);
-    expect(result.fields.dob).toBeUndefined();
+  test("undefined for nonsense", () => {
+    expect(__testables.parseCount("banana")).toBeUndefined();
+    expect(__testables.parseCount(undefined)).toBeUndefined();
   });
 });
 
 describe("buildFeedFields", () => {
-  test("maps a complete feed purchase", () => {
-    const result = buildFeedFields(
+  test("passes bags + per-bag weight through without computing the total", () => {
+    const fields = buildFeedFields(
       intentWith({
-        type: { value: "hay" },
-        quantity: { value: "10" },
-        unit: { value: "bales" },
-        cost: { value: "80" },
-        vendor: { value: "Tractor Supply" },
+        bags: { value: "4" },
+        bagWeight: { value: "50" },
+        feedType: {
+          value: "layers",
+          resolutions: {
+            resolutionsPerAuthority: [
+              { values: [{ value: { name: "chicken" } }] },
+            ],
+          },
+        },
+        cost: { value: "60" },
+        date: { value: "2026-06-21" },
       }),
     );
-    expect(result.ok).toBe(true);
-    expect(result.fields).toEqual({
-      type: "hay",
-      quantity: 10,
-      unit: "bale",
-      cost: 80,
-      vendor: "Tractor Supply",
+    expect(fields).toEqual({
+      bags: 4,
+      bagWeightLbs: 50,
+      feedType: "chicken",
+      cost: 60,
+      date: "2026-06-21",
     });
   });
 
-  test("defaults vendor to unknown", () => {
-    const result = buildFeedFields(
+  test("omits optional cost and date when absent", () => {
+    const fields = buildFeedFields(
       intentWith({
-        type: { value: "grain" },
-        quantity: { value: "5" },
-        unit: { value: "bag" },
-        cost: { value: "30" },
+        bags: { value: "2" },
+        bagWeight: { value: "40" },
+        feedType: { value: "goat" },
       }),
     );
-    expect(result.fields.vendor).toBe("unknown");
+    expect(fields).toEqual({ bags: 2, bagWeightLbs: 40, feedType: "goat" });
   });
+});
 
-  test("reprompts on missing type", () => {
-    expect(buildFeedFields(intentWith({})).ok).toBe(false);
+describe("buildEggFields", () => {
+  test("maps a dozen to 12", () => {
+    expect(buildEggFields(intentWith({ count: { value: "a dozen" } }))).toEqual({
+      count: 12,
+    });
   });
-
-  test("reprompts on non-positive quantity", () => {
-    const result = buildFeedFields(
+  test("includes date and coop when present", () => {
+    const fields = buildEggFields(
       intentWith({
-        type: { value: "hay" },
-        quantity: { value: "0" },
-        unit: { value: "bale" },
-        cost: { value: "10" },
+        count: { value: "9" },
+        date: { value: "2026-06-20" },
+        coop: { value: "north coop" },
       }),
     );
-    expect(result.ok).toBe(false);
-    expect(result.reprompt).toMatch(/quantity/i);
+    expect(fields).toEqual({ count: 9, date: "2026-06-20", coop: "north coop" });
   });
+});
 
-  test("reprompts on unknown unit", () => {
-    const result = buildFeedFields(
+describe("buildBirthFields", () => {
+  test("maps species, count, dam, sire, and date", () => {
+    const fields = buildBirthFields(
       intentWith({
-        type: { value: "hay" },
-        quantity: { value: "3" },
-        unit: { value: "scoops" },
-        cost: { value: "10" },
+        species: { value: "goat" },
+        count: { value: "2" },
+        dam: { value: "Daisy" },
+        sire: { value: "Max" },
+        date: { value: "2026-06-21" },
       }),
     );
-    expect(result.ok).toBe(false);
-    expect(result.reprompt).toMatch(/unit/i);
+    expect(fields).toEqual({
+      species: "goat",
+      count: 2,
+      dam: "Daisy",
+      sire: "Max",
+      date: "2026-06-21",
+    });
+  });
+
+  test("drops an invalid date", () => {
+    const fields = buildBirthFields(
+      intentWith({ species: { value: "cow" }, date: { value: "yesterday" } }),
+    );
+    expect(fields.date).toBeUndefined();
+    expect(fields.species).toBe("cow");
+  });
+});
+
+describe("buildDeathFields", () => {
+  test("maps animalRef, cause, and date", () => {
+    expect(
+      buildDeathFields(
+        intentWith({
+          animalRef: { value: "Bessie" },
+          cause: { value: "illness" },
+          date: { value: "2026-06-19" },
+        }),
+      ),
+    ).toEqual({ animalRef: "Bessie", cause: "illness", date: "2026-06-19" });
+  });
+});
+
+describe("buildMoveFields", () => {
+  test("maps group, pasture, and date", () => {
+    expect(
+      buildMoveFields(
+        intentWith({
+          group: { value: "the goats" },
+          pasture: { value: "south field" },
+          date: { value: "2026-06-21" },
+        }),
+      ),
+    ).toEqual({ group: "the goats", pasture: "south field", date: "2026-06-21" });
+  });
+});
+
+describe("buildPeriodQuery", () => {
+  test("returns the period when present", () => {
+    expect(buildPeriodQuery(intentWith({ period: { value: "this week" } }))).toEqual(
+      { period: "this week" },
+    );
+  });
+  test("empty object when absent", () => {
+    expect(buildPeriodQuery(intentWith({}))).toEqual({});
   });
 });
