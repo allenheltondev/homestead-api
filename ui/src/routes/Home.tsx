@@ -1,0 +1,229 @@
+import type { ReactElement, ReactNode } from 'react';
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { useApiFetch } from '../auth/useApiFetch';
+import { getFeedStats, getStatsSummary } from '../api/stats';
+import type { FeedStats, StatsSummary } from '../api/types';
+import HerdChart from '../components/HerdChart';
+import FeedSpendChart from '../components/FeedSpendChart';
+import { formatMoney } from '../components/format';
+
+interface DashboardData {
+  summary: StatsSummary;
+  feed: FeedStats | null;
+}
+
+export default function Home(): ReactElement {
+  const apiFetch = useApiFetch();
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    setData(null);
+
+    Promise.all([
+      getStatsSummary(apiFetch),
+      // Best-effort: drives the per-type spend chart for the current month.
+      getFeedStats(apiFetch).catch(() => null),
+    ])
+      .then(([summary, feed]) => {
+        if (cancelled) return;
+        setData({ summary, feed });
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setError(err.message);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFetch]);
+
+  if (error) {
+    return (
+      <section className="space-y-4">
+        <h1 className="text-3xl font-semibold text-foreground">Dashboard</h1>
+        <p className="form-error">Could not load your dashboard: {error}</p>
+      </section>
+    );
+  }
+
+  if (!data) {
+    return (
+      <section className="space-y-6">
+        <h1 className="text-3xl font-semibold text-foreground">Dashboard</h1>
+        <p className="text-muted-foreground">Loading...</p>
+      </section>
+    );
+  }
+
+  const { summary, feed } = data;
+  const noData = summary.herd.totalAnimals === 0 && summary.pastures.total === 0;
+
+  if (noData) {
+    return (
+      <section className="space-y-6">
+        <DashboardHeader />
+        <div className="card card-body text-center py-16 space-y-4">
+          <p className="text-muted-foreground">
+            Nothing tracked yet. Register your first animal to start watching your herd.
+          </p>
+          <Link to="/animals/new" className="btn-primary inline-flex w-auto mx-auto">
+            Register your first animal
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="space-y-8">
+      <DashboardHeader />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Active animals"
+          value={String(summary.herd.activeAnimals)}
+          sub={
+            <span className="text-muted-foreground">
+              {summary.herd.totalAnimals} total on record
+            </span>
+          }
+        />
+        <StatCard
+          label={`Births in ${summary.asOf.year}`}
+          value={String(summary.births.thisYear)}
+          sub={
+            <span className="text-muted-foreground">{summary.births.thisMonth} this month</span>
+          }
+        />
+        <StatCard
+          label={`Deaths in ${summary.asOf.year}`}
+          value={String(summary.deaths.thisYear)}
+          accent={summary.deaths.thisYear > 0 ? 'warning' : undefined}
+          sub={
+            <span className="text-muted-foreground">{summary.deaths.thisMonth} this month</span>
+          }
+        />
+        <StatCard
+          label="Feed spend this month"
+          value={formatMoney(summary.feed.thisMonthSpend)}
+          sub={
+            <Link to="/feed" className="text-primary-600 hover:underline">
+              View feed
+            </Link>
+          }
+        />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-foreground">Herd by species</h2>
+          <HerdChart bySpecies={summary.herd.bySpecies} />
+        </section>
+
+        <PanelCard
+          title="Pasture occupancy"
+          action={
+            <Link to="/pastures" className="btn-link">
+              All pastures
+            </Link>
+          }
+        >
+          {summary.pastures.occupancy.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-2">No pastures yet.</p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {summary.pastures.occupancy.map((p, i) => (
+                <li
+                  key={`${p.name ?? 'pasture'}-${i}`}
+                  className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-3"
+                >
+                  <span className="text-sm font-medium text-foreground truncate">
+                    {p.name ?? 'Unnamed pasture'}
+                  </span>
+                  <span className="text-sm text-muted-foreground shrink-0">
+                    {p.count} animal{p.count === 1 ? '' : 's'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </PanelCard>
+      </div>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold text-foreground">
+          Feed spend by type · {summary.asOf.month}
+        </h2>
+        <FeedSpendChart byType={feed?.byType ?? {}} />
+      </section>
+    </section>
+  );
+}
+
+function DashboardHeader(): ReactElement {
+  return (
+    <header className="flex flex-wrap items-end justify-between gap-4">
+      <div className="space-y-1">
+        <h1 className="text-3xl font-semibold text-foreground">Dashboard</h1>
+        <p className="text-muted-foreground">
+          Your herd, births and deaths, feed spend, and pasture occupancy.
+        </p>
+      </div>
+      <Link to="/animals/new" className="btn-primary w-auto">
+        Register animal
+      </Link>
+    </header>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  sub,
+  accent,
+}: {
+  label: string;
+  value: string;
+  sub?: ReactNode;
+  accent?: 'warning' | 'success';
+}): ReactElement {
+  const valueColor =
+    accent === 'warning'
+      ? 'text-warning-700'
+      : accent === 'success'
+        ? 'text-success-700'
+        : 'text-foreground';
+  return (
+    <div className="card card-body !py-4">
+      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <span className={`text-2xl font-semibold mt-1 block ${valueColor}`}>{value}</span>
+      {sub && <span className="text-xs mt-1 block">{sub}</span>}
+    </div>
+  );
+}
+
+function PanelCard({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  action?: ReactNode;
+  children: ReactNode;
+}): ReactElement {
+  return (
+    <div className="card">
+      <div className="card-header flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        {action}
+      </div>
+      <div className="card-body">{children}</div>
+    </div>
+  );
+}
