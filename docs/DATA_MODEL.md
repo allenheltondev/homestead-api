@@ -32,6 +32,8 @@ UTC strings so string ordering on a sort key matches chronological order.
 | Pasture                 | `PASTURE#<id>`      | `METADATA`                 | `PASTURE`                    | `<name>`                            | —        | —                                       |
 | Feed purchase           | `FEED#<yyyy-mm>`    | `PURCHASE#<ts>#<id>`       | `FEED#<type>`               | `<ts>`                              | —        | —                                       |
 | Feed purchase -> id pointer | `FEEDID#<id>`   | `POINTER`                  | —                            | —                                   | —        | —                                       |
+| Feed consumption        | `FEEDUSE#<yyyy-mm>` | `USE#<ts>#<id>`            | —                            | —                                   | —        | —                                       |
+| Feed consumption -> id pointer | `FEEDUSEID#<id>` | `POINTER`              | —                            | —                                   | —        | —                                       |
 | Egg collection          | `EGG#<yyyy-mm>`     | `COLLECT#<ts>#<id>`        | —                            | —                                   | —        | —                                       |
 | Egg collection -> id pointer | `EGGID#<id>`   | `POINTER`                  | —                            | —                                   | —        | —                                       |
 
@@ -54,6 +56,8 @@ UTC strings so string ordering on a sort key matches chronological order.
 | 13| Resolve a feed purchase's key from its id (for DELETE) | GetItem | table | `pk = FEEDID#<id>`, `sk = POINTER`                                         |
 | 14| List egg collections for a month                     | Query     | table | `pk = EGG#<yyyy-mm>`, `begins_with(sk, "COLLECT#")` (or `sk BETWEEN` for a ts range) |
 | 15| Resolve an egg collection's key from its id (for DELETE) | GetItem | table | `pk = EGGID#<id>`, `sk = POINTER`                                          |
+| 16| List feed consumption for a month                    | Query     | table | `pk = FEEDUSE#<yyyy-mm>`, `begins_with(sk, "USE#")` (or `sk BETWEEN` for a ts range; optional `feedType` `FilterExpression`) |
+| 17| Resolve a feed consumption's key from its id (for DELETE) | GetItem | table | `pk = FEEDUSEID#<id>`, `sk = POINTER`                                  |
 
 ## Notes
 
@@ -84,6 +88,29 @@ UTC strings so string ordering on a sort key matches chronological order.
   `coop`, `createdAt`. A range list fans out one `Query` per month
   partition in the window (no Scan). Like feed purchases, an id-pointer item
   (`pk = EGGID#<id>`, `sk = POINTER`) backs scan-free DELETE by bare id.
+- **Feed consumption** partitions by month (`FEEDUSE#<yyyy-mm>`); the sort
+  key `USE#<ts>#<id>` (ts = `usedAt` ISO) keeps a month's usage chronological.
+  Fields: `feedType` (normalized lower-case; chicken/layer/poultry collapse to
+  `poultry`), `lbs` (number > 0), `usedAt` (ISO), `createdAt`. `POST
+  /feed-consumption` accepts `{ feedType, lbs }` or `{ feedType, bags,
+  bagWeightLbs }` (lbs = bags \* bagWeightLbs). A range list fans out one
+  `Query` per month partition (pattern 16), filtering an optional `type`
+  in-partition (no Scan). Like feed purchases and egg collections, an
+  id-pointer item (`pk = FEEDUSEID#<id>`, `sk = POINTER`) backs scan-free
+  DELETE by bare id (pattern 17). Create publishes a `FeedConsumed` event.
+- **Feed inventory** (`GET /stats/feed-inventory`) composes feed purchases
+  (lbs in) with feed consumption (lbs out) into a per-`feedType` position:
+  `purchasedLbs` (prefer `totalLbs`, else `bags * bagWeightLbs`, else the
+  legacy `quantity` treated as lb), `consumedLbs`, `onHandLbs`
+  (`purchasedLbs - consumedLbs`, floored at 0), `avgUnitCost`
+  (`purchaseCost / purchasedLbs`, $/lb), `onHandValue`
+  (`onHandLbs * avgUnitCost`), `burnRateLbsPerDay` (consumed lbs over a
+  trailing 30-day window ÷ 30), `daysRemaining` (`onHandLbs / burnRate`, null
+  when burnRate is 0), and `projectedRunOutDate` (today + daysRemaining), plus
+  a `totals` object. It `Query`s only the `FEED#<yyyy-mm>` (pattern 11) and
+  `FEEDUSE#<yyyy-mm>` (pattern 16) partitions -- no Scans. The
+  `/stats/summary` `feed` block composes `onHandLbs` + `daysRemaining` from
+  these totals.
 - **Egg analytics** (`GET /stats/eggs`, `/stats/egg-cost`, and the egg
   blocks of `/stats/summary`) are read-only aggregations: they `Query` the
   egg month partitions (pattern 14) and the feed month partitions
@@ -91,5 +118,16 @@ UTC strings so string ordering on a sort key matches chronological order.
   poultry feed spend by dozens (null when there are no dozens); the store
   comparison uses `STORE_EGG_PRICE_PER_DOZEN` (or a `storePricePerDozen`
   query-param override). No Scans.
+- **Refined cost-per-dozen** (`GET /stats/egg-cost`): the top-level
+  `costPerDozen` is the original **purchase basis** (poultry feed *spend* over
+  the period ÷ dozens) and is unchanged for backward compatibility. The added
+  `consumptionBasis` block is the **consumption basis**: poultry feed
+  *consumed* during the period (pattern 16), valued at the average purchase
+  unit cost (`avgUnitCost`, $/lb), divided by the dozens collected in *lay
+  months* only -- months in the period that actually have egg collections.
+  This matches feed eaten to eggs produced, so it doesn't swing with purchase
+  timing and ignores out-of-lay months with feed usage but no eggs. Cost
+  figures are null when `avgUnitCost` is null (no poultry weight purchased) or
+  there are no lay-month dozens. No Scans.
 - `expiresAt` is reserved for TTL on any ephemeral records (e.g.
   idempotency entries); permanent records omit it.

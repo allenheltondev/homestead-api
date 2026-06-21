@@ -383,7 +383,14 @@ describe("summaryStats", () => {
     // June counts 3; the full year = June (3) + 11 other months (1 each) = 14.
     expect(summary.births).toEqual({ thisMonth: 3, thisYear: 14 });
     expect(summary.deaths).toEqual({ thisMonth: 1, thisYear: 1 });
-    expect(summary.feed).toEqual({ thisMonthSpend: 99, thisMonthQuantity: 6 });
+    // Existing spend/quantity preserved; onHandLbs/daysRemaining composed from
+    // the feed-inventory totals (no consumption mocked -> burnRate 0 -> null).
+    expect(summary.feed).toEqual({
+      thisMonthSpend: 99,
+      thisMonthQuantity: 6,
+      onHandLbs: 6,
+      daysRemaining: null,
+    });
     // 24 eggs this month, all within the trailing week (June 15-21).
     expect(summary.eggs).toEqual({ thisWeek: 24, thisMonth: 24 });
     // 24 eggs = 2 dozen; poultry feed spend 24 -> $12/dozen, above the $4 default.

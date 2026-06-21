@@ -259,16 +259,28 @@ export async function eggStatsForPeriod(period, months) {
 }
 
 // --- Egg cost per dozen -------------------------------------------------
-// Composes egg counts (eggStats) with poultry feed spend over the same
-// period. poultryFeedSpend sums `cost` over feed purchases whose feedType is
-// poultry (chicken/layer/poultry). costPerDozen / costPerEgg derive from
-// that spend; when there are no dozens the cost figures are null so callers
-// don't divide by zero. Comparison against the store price yields the
-// savings + cheaperThanStore flags.
+// Two cost-per-dozen models, both poultry-only:
+//
+//  1. PURCHASE BASIS (original, unchanged top-level fields): divides poultry
+//     feed *spend* (sum of purchase `cost`) over the period by dozens. Simple
+//     and cash-flow oriented, but lumpy -- a bulk buy in one month inflates
+//     that month's cost-per-dozen even though the feed feeds many months.
+//
+//  2. CONSUMPTION BASIS (added `consumptionBasis` block): divides the value
+//     of poultry feed *consumed* during the period -- consumed lbs valued at
+//     the average purchase unit cost ($/lb) -- by dozens, counting only the
+//     dozens collected in *lay months* (months in the period that actually
+//     have egg collections). This matches feed actually eaten to eggs
+//     actually produced, so it doesn't swing with purchase timing and ignores
+//     out-of-lay months that have feed usage but no eggs.
+//
+// Both leave cost figures null when there are no qualifying dozens so callers
+// never divide by zero. The store comparison uses the resolved store price.
 export async function eggCostStats(period, months, { storePricePerDozen } = {}) {
-  const [{ totalEggs, dozens }, poultryFeedSpend] = await Promise.all([
+  const [{ totalEggs, dozens }, poultryFeedSpend, consumptionBasis] = await Promise.all([
     eggStats(months),
     poultryFeedSpendForMonths(months),
+    poultryConsumptionBasis(months, storePricePerDozen),
   ]);
 
   const storePrice = resolveStorePricePerDozen(storePricePerDozen);
@@ -295,6 +307,76 @@ export async function eggCostStats(period, months, { storePricePerDozen } = {}) 
     costPerDozen,
     costPerEgg,
     storePricePerDozen: storePrice,
+    savingsPerDozen,
+    cheaperThanStore,
+    consumptionBasis,
+  };
+}
+
+// Builds the consumption-basis cost-per-dozen block (see eggCostStats).
+//
+// - avgUnitCost: total poultry purchase cost / total poultry purchased lbs
+//   ($/lb) over the period. null when no poultry weight was purchased.
+// - consumedLbs: poultry feed consumed during the period.
+// - consumedValue: consumedLbs * avgUnitCost (null when avgUnitCost is null).
+// - layMonths: months in the period that have at least one egg collection.
+// - dozens: dozens collected in those lay months only.
+// - costPerDozen: consumedValue / dozens; null when either input is null/0.
+async function poultryConsumptionBasis(months, storePricePerDozen) {
+  const [purchases, consumption, perMonthEggs] = await Promise.all([
+    feedPurchasesForMonths(months),
+    feedConsumptionForMonths(months),
+    Promise.all(months.map((m) => eggStats([m]))),
+  ]);
+
+  // Average poultry purchase unit cost ($/lb) over the period.
+  let purchasedLbs = 0;
+  let purchaseCost = 0;
+  for (const purchase of purchases) {
+    if (purchaseFeedType(purchase) === "poultry") {
+      purchasedLbs += purchaseLbs(purchase);
+      purchaseCost += Number(purchase.cost) || 0;
+    }
+  }
+  const avgUnitCost = purchasedLbs > 0 ? purchaseCost / purchasedLbs : null;
+
+  // Poultry feed consumed during the period.
+  let consumedLbs = 0;
+  for (const usage of consumption) {
+    if (usageFeedType(usage) === "poultry") {
+      consumedLbs += Number(usage.lbs) || 0;
+    }
+  }
+
+  // Lay months + the dozens collected in them.
+  let layMonths = 0;
+  let dozens = 0;
+  for (let i = 0; i < months.length; i += 1) {
+    if (perMonthEggs[i].totalEggs > 0) {
+      layMonths += 1;
+      dozens += perMonthEggs[i].dozens;
+    }
+  }
+
+  const consumedValue = avgUnitCost === null ? null : consumedLbs * avgUnitCost;
+
+  let costPerDozen = null;
+  let savingsPerDozen = null;
+  let cheaperThanStore = null;
+  if (consumedValue !== null && dozens > 0) {
+    const storePrice = resolveStorePricePerDozen(storePricePerDozen);
+    costPerDozen = consumedValue / dozens;
+    savingsPerDozen = storePrice - costPerDozen;
+    cheaperThanStore = costPerDozen < storePrice;
+  }
+
+  return {
+    avgUnitCost,
+    consumedLbs,
+    consumedValue,
+    layMonths,
+    dozens,
+    costPerDozen,
     savingsPerDozen,
     cheaperThanStore,
   };
@@ -326,6 +408,261 @@ async function poultryFeedSpendForMonths(months) {
   return spend;
 }
 
+// --- Feed inventory + forecasting --------------------------------------
+// Composes feed purchases (lbs in) with feed consumption (lbs out) to a
+// per-feedType on-hand position, value, and a 30-day burn-rate forecast.
+// All reads Query a known month partition (FEED#<yyyy-mm> for purchases,
+// FEEDUSE#<yyyy-mm> for consumption) -- there are NO Scans.
+//
+// Field model (per feedType, plus a `totals` object):
+//   purchasedLbs  total weight purchased. Prefer `totalLbs`; else
+//                 bags * bagWeightLbs; else the legacy `quantity` (treated
+//                 as lb -- legacy purchases recorded quantity in pounds).
+//   consumedLbs   total weight consumed (sum of usage `lbs`).
+//   onHandLbs     purchasedLbs - consumedLbs (floored at 0 so a data gap
+//                 can't report a negative inventory).
+//   avgUnitCost   total purchase cost / purchasedLbs ($/lb); null when no
+//                 weight was purchased.
+//   onHandValue   onHandLbs * avgUnitCost (null when avgUnitCost is null).
+//   burnRateLbsPerDay  consumed lbs over a trailing 30-day window / 30.
+//   daysRemaining onHandLbs / burnRate; null when burnRate is 0.
+//   projectedRunOutDate  today + daysRemaining (ISO date); null when
+//                 daysRemaining is null.
+
+// The grain weight of a single purchase row. Prefers the explicit totalLbs,
+// then derives from bags * bagWeightLbs, then falls back to the legacy
+// quantity attribute (legacy purchases recorded quantity in pounds). Returns
+// 0 when no weight can be determined so a malformed row contributes nothing.
+function purchaseLbs(purchase) {
+  const totalLbs = Number(purchase.totalLbs);
+  if (Number.isFinite(totalLbs) && totalLbs > 0) return totalLbs;
+
+  const bags = Number(purchase.bags);
+  const bagWeightLbs = Number(purchase.bagWeightLbs);
+  if (Number.isFinite(bags) && Number.isFinite(bagWeightLbs) && bags > 0 && bagWeightLbs > 0) {
+    return bags * bagWeightLbs;
+  }
+
+  const quantity = Number(purchase.quantity);
+  if (Number.isFinite(quantity) && quantity > 0) return quantity;
+
+  return 0;
+}
+
+// The feedType key a purchase aggregates under. Mirrors the egg-cost
+// classification: poultry aliases collapse to "poultry"; otherwise the stored
+// feedType/type is used verbatim (already normalized lower-case on write).
+function purchaseFeedType(purchase) {
+  const raw = purchase.feedType ?? purchase.type;
+  if (isPoultryType(raw)) return "poultry";
+  return typeof raw === "string" && raw.length > 0 ? raw : "unknown";
+}
+
+// Queries every FEED#<yyyy-mm> purchase partition in the months list (no
+// Scan) and returns the flat list of purchase rows.
+async function feedPurchasesForMonths(months) {
+  const batches = await Promise.all(
+    months.map((month) =>
+      queryAll({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": `FEED#${month}`,
+          ":sk": "PURCHASE#",
+        },
+      }),
+    ),
+  );
+  return batches.flat();
+}
+
+// Queries every FEEDUSE#<yyyy-mm> consumption partition in the months list
+// (no Scan) and returns the flat list of usage rows.
+async function feedConsumptionForMonths(months) {
+  const batches = await Promise.all(
+    months.map((month) =>
+      queryAll({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": `FEEDUSE#${month}`,
+          ":sk": "USE#",
+        },
+      }),
+    ),
+  );
+  return batches.flat();
+}
+
+// The usage row's feedType, collapsing poultry aliases like purchases do.
+function usageFeedType(usage) {
+  const raw = usage.feedType;
+  if (isPoultryType(raw)) return "poultry";
+  return typeof raw === "string" && raw.length > 0 ? raw : "unknown";
+}
+
+// Expands the list of YYYY-MM buckets covering [startMs, endMs] inclusive so
+// the trailing-window burn rate queries only the partitions it needs.
+function monthsBetween(startMs, endMs) {
+  const start = new Date(startMs);
+  let year = start.getUTCFullYear();
+  let month = start.getUTCMonth();
+  const end = new Date(endMs);
+  const endYear = end.getUTCFullYear();
+  const endMonth = end.getUTCMonth();
+
+  const months = [];
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    months.push(`${year}-${String(month + 1).padStart(2, "0")}`);
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  return months;
+}
+
+// Lifetime feed inventory: aggregates every purchase and consumption record
+// to date into a per-feedType on-hand position + 30-day burn forecast.
+//
+// `months` bounds the purchase + consumption aggregation (purchasedLbs,
+// consumedLbs, value). It defaults to every month from the earliest tracked
+// month through the current month so the on-hand figure reflects lifetime
+// flow; callers can pass an explicit list to scope it.
+//
+// The burn rate always uses a trailing 30-day window ending at `now`
+// regardless of `months`, so daysRemaining reflects recent usage.
+export async function feedInventory(now = new Date(), { months } = {}) {
+  const nowDate = new Date(now);
+  // Default the aggregation window to a wide lifetime range. Tracking begins
+  // well after 2000, so this bounds the fan-out without missing data.
+  const aggMonths = months ?? monthsBetween(
+    Date.UTC(2000, 0, 1),
+    Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth(), 1),
+  );
+
+  // Trailing 30-day burn window.
+  const windowMs = 30 * 24 * 60 * 60 * 1000;
+  const windowStart = new Date(nowDate.getTime() - windowMs);
+  const windowMonths = monthsBetween(windowStart.getTime(), nowDate.getTime());
+  const windowStartIso = windowStart.toISOString();
+  const windowEndIso = nowDate.toISOString();
+
+  const [purchases, consumption, windowConsumption] = await Promise.all([
+    feedPurchasesForMonths(aggMonths),
+    feedConsumptionForMonths(aggMonths),
+    feedConsumptionForMonths(windowMonths),
+  ]);
+
+  // Per-feedType accumulators: purchased lbs/cost (for value + avgUnitCost),
+  // consumed lbs, and trailing-window consumed lbs (for burn rate).
+  const byType = {};
+  const ensure = (type) => {
+    if (!byType[type]) {
+      byType[type] = { purchasedLbs: 0, purchaseCost: 0, consumedLbs: 0, windowLbs: 0 };
+    }
+    return byType[type];
+  };
+
+  for (const purchase of purchases) {
+    const acc = ensure(purchaseFeedType(purchase));
+    acc.purchasedLbs += purchaseLbs(purchase);
+    acc.purchaseCost += Number(purchase.cost) || 0;
+  }
+
+  for (const usage of consumption) {
+    ensure(usageFeedType(usage)).consumedLbs += Number(usage.lbs) || 0;
+  }
+
+  for (const usage of windowConsumption) {
+    const usedAt = usage.usedAt;
+    if (typeof usedAt === "string" && usedAt >= windowStartIso && usedAt <= windowEndIso) {
+      ensure(usageFeedType(usage)).windowLbs += Number(usage.lbs) || 0;
+    }
+  }
+
+  const feedTypes = Object.entries(byType)
+    .map(([feedType, acc]) => buildInventoryEntry(feedType, acc, nowDate))
+    .sort((a, b) => a.feedType.localeCompare(b.feedType));
+
+  return { feedTypes, totals: buildInventoryTotals(feedTypes) };
+}
+
+// Shapes one feedType's accumulator into the public inventory entry, deriving
+// on-hand, value, burn rate, and the run-out forecast.
+function buildInventoryEntry(feedType, acc, nowDate) {
+  const purchasedLbs = acc.purchasedLbs;
+  const consumedLbs = acc.consumedLbs;
+  const onHandLbs = Math.max(0, purchasedLbs - consumedLbs);
+
+  const avgUnitCost = purchasedLbs > 0 ? acc.purchaseCost / purchasedLbs : null;
+  const onHandValue = avgUnitCost === null ? null : onHandLbs * avgUnitCost;
+
+  const burnRateLbsPerDay = acc.windowLbs / 30;
+  const { daysRemaining, projectedRunOutDate } = forecastRunOut(
+    onHandLbs,
+    burnRateLbsPerDay,
+    nowDate,
+  );
+
+  return {
+    feedType,
+    purchasedLbs,
+    consumedLbs,
+    onHandLbs,
+    avgUnitCost,
+    onHandValue,
+    burnRateLbsPerDay,
+    daysRemaining,
+    projectedRunOutDate,
+  };
+}
+
+// daysRemaining = onHandLbs / burnRate (null when burnRate is 0 -- nothing
+// is being consumed, so it never runs out on the current trend);
+// projectedRunOutDate = today + daysRemaining as an ISO date.
+function forecastRunOut(onHandLbs, burnRateLbsPerDay, nowDate) {
+  if (!(burnRateLbsPerDay > 0)) {
+    return { daysRemaining: null, projectedRunOutDate: null };
+  }
+  const daysRemaining = onHandLbs / burnRateLbsPerDay;
+  const runOutMs = nowDate.getTime() + daysRemaining * 24 * 60 * 60 * 1000;
+  const projectedRunOutDate = new Date(runOutMs).toISOString().slice(0, 10);
+  return { daysRemaining, projectedRunOutDate };
+}
+
+// Rolls the per-feedType entries into a totals object. Weighted figures
+// (purchasedLbs/consumedLbs/onHandLbs/value) sum directly; the aggregate
+// burn rate sums the per-type rates and re-derives daysRemaining + run-out
+// from the totals so the headline forecast is internally consistent.
+function buildInventoryTotals(feedTypes) {
+  const totals = {
+    purchasedLbs: 0,
+    consumedLbs: 0,
+    onHandLbs: 0,
+    onHandValue: 0,
+    burnRateLbsPerDay: 0,
+  };
+
+  for (const e of feedTypes) {
+    totals.purchasedLbs += e.purchasedLbs;
+    totals.consumedLbs += e.consumedLbs;
+    totals.onHandLbs += e.onHandLbs;
+    totals.onHandValue += e.onHandValue ?? 0;
+    totals.burnRateLbsPerDay += e.burnRateLbsPerDay;
+  }
+
+  const { daysRemaining, projectedRunOutDate } = forecastRunOut(
+    totals.onHandLbs,
+    totals.burnRateLbsPerDay,
+    new Date(),
+  );
+  totals.daysRemaining = daysRemaining;
+  totals.projectedRunOutDate = projectedRunOutDate;
+  return totals;
+}
+
 // --- Summary ------------------------------------------------------------
 // One speakable payload composing the above: herd by species, births &
 // deaths this month + this year, feed spend this month, and pasture
@@ -346,6 +683,7 @@ export async function summaryStats(now = new Date()) {
     eggsMonth,
     eggsWeek,
     eggCostMonth,
+    inventory,
   ] = await Promise.all([
     herdStats(),
     pastureOccupancy(),
@@ -357,6 +695,7 @@ export async function summaryStats(now = new Date()) {
     eggStats([month]),
     eggsThisWeek(now),
     eggCostStats(month, [month]),
+    feedInventory(now),
   ]);
 
   const herdBySpecies = Object.entries(herd.bySpecies).map(([species, s]) => ({
@@ -377,6 +716,10 @@ export async function summaryStats(now = new Date()) {
     feed: {
       thisMonthSpend: feedMonth.totalCost,
       thisMonthQuantity: feedMonth.totalQuantity,
+      // Composed from the feed-inventory totals: lbs currently on hand and
+      // the headline days-remaining forecast (null when nothing is burning).
+      onHandLbs: inventory.totals.onHandLbs,
+      daysRemaining: inventory.totals.daysRemaining,
     },
     eggs: {
       thisWeek: eggsWeek,

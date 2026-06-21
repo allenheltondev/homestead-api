@@ -3,6 +3,7 @@ import { registerStatsRoutes } from "./stats.mjs";
 import { registerPastureRoutes } from "./pastures.mjs";
 import { registerMovementRoutes } from "./movements.mjs";
 import { registerFeedRoutes } from "./feed.mjs";
+import { registerFeedConsumptionRoutes } from "./feedConsumption.mjs";
 import { registerEggRoutes } from "./eggs.mjs";
 import { registerAnimalRoutes } from "./animals.mjs";
 
@@ -16,6 +17,7 @@ export function registerRoutes(app) {
   registerPastureRoutes(app);
   registerMovementRoutes(app);
   registerFeedRoutes(app);
+  registerFeedConsumptionRoutes(app);
   registerEggRoutes(app);
   registerAnimalRoutes(app);
 }
