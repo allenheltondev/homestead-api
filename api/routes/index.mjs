@@ -1,4 +1,8 @@
 import { registerHealthRoutes } from "./health.mjs";
+import { registerStatsRoutes } from "./stats.mjs";
+import { registerPastureRoutes } from "./pastures.mjs";
+import { registerMovementRoutes } from "./movements.mjs";
+import { registerFeedRoutes } from "./feed.mjs";
 import { registerAnimalRoutes } from "./animals.mjs";
 
 // Single shared route-registration point. Each feature stream adds ONE
@@ -7,5 +11,9 @@ import { registerAnimalRoutes } from "./animals.mjs";
 // conflicts stay trivial.
 export function registerRoutes(app) {
   registerHealthRoutes(app);
+  registerStatsRoutes(app);
+  registerPastureRoutes(app);
+  registerMovementRoutes(app);
+  registerFeedRoutes(app);
   registerAnimalRoutes(app);
 }
