@@ -6,6 +6,7 @@ import {
   birthStats,
   deathStats,
   feedStats,
+  feedInventory,
   eggStatsForPeriod,
   eggCostStats,
   summaryStats,
@@ -44,6 +45,13 @@ export function registerStatsRoutes(app) {
   app.get("/stats/feed", async ({ event }) => {
     const months = resolvePeriod(event);
     return jsonResponse(200, await feedStats(months));
+  });
+
+  // GET /stats/feed-inventory -- per-feedType on-hand lbs, value, burn rate,
+  // and run-out forecast plus a `totals` object. Composes feed purchases
+  // (lbs in) with feed consumption (lbs out); no Scans.
+  app.get("/stats/feed-inventory", async () => {
+    return jsonResponse(200, await feedInventory());
   });
 
   // GET /stats/eggs?period=YYYY-MM|YYYY -- total eggs, dozens, days, perDay.
