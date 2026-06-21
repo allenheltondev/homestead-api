@@ -195,6 +195,40 @@ export interface FeedPurchaseFilters {
   type?: string;
 }
 
+// --- Feed consumption ---------------------------------------------------
+
+// A logged feed-usage event. lbs is the total feed consumed; bag-based entries
+// also carry bags + per-bag weight (server computes lbs = bags * bagWeightLbs).
+export interface FeedConsumption {
+  id: string;
+  feedType: string;
+  lbs: number;
+  bags?: number;
+  bagWeightLbs?: number;
+  date: string;
+  createdAt: string;
+}
+
+export interface FeedConsumptionListResponse {
+  feed_consumption: FeedConsumption[];
+}
+
+// POST /feed-consumption — record feed used. Supply either lbs directly, or
+// bags + bagWeightLbs (server computes lbs). date defaults server-side to today.
+export interface CreateFeedConsumptionRequest {
+  feedType: string;
+  lbs?: number;
+  bags?: number;
+  bagWeightLbs?: number;
+  date?: string;
+}
+
+export interface FeedConsumptionFilters {
+  from?: string;
+  to?: string;
+  type?: string;
+}
+
 // --- Eggs ---------------------------------------------------------------
 
 export interface EggCollection {
@@ -287,6 +321,49 @@ export interface EggCostStats {
   storePricePerDozen: number;
   savingsPerDozen: number;
   cheaperThanStore: boolean;
+  // Refined cost-per-dozen computed from logged feed *consumption* (valued at
+  // average unit cost) rather than raw purchase spend. Present when usage has
+  // been logged for the period.
+  consumptionBasis?: EggCostConsumptionBasis;
+}
+
+// Consumption-basis cost-per-dozen: feed actually fed to the flock, valued at
+// average unit cost, divided by eggs produced over the same period.
+export interface EggCostConsumptionBasis {
+  poultryFeedConsumedLbs: number;
+  poultryFeedConsumedValue: number;
+  costPerDozen: number;
+  costPerEgg: number;
+  savingsPerDozen: number;
+  cheaperThanStore: boolean;
+}
+
+// --- Feed inventory -----------------------------------------------------
+
+// GET /stats/feed-inventory — per-type on-hand position and burn-down forecast.
+export interface FeedInventoryRow {
+  feedType: string;
+  purchasedLbs: number;
+  consumedLbs: number;
+  onHandLbs: number;
+  avgUnitCost: number;
+  onHandValue: number;
+  burnRateLbsPerDay: number;
+  daysRemaining: number | null;
+  projectedRunOutDate: string | null;
+}
+
+export interface FeedInventoryTotals {
+  purchasedLbs: number;
+  consumedLbs: number;
+  onHandLbs: number;
+  onHandValue: number;
+  burnRateLbsPerDay: number;
+}
+
+export interface FeedInventoryStats {
+  byType: FeedInventoryRow[];
+  totals: FeedInventoryTotals;
 }
 
 // GET /stats/summary — one composed dashboard payload.

@@ -19,10 +19,12 @@ function money(amount: number): string {
 }
 
 // Cost-per-dozen analytics card: your home-produced cost vs. the store price,
-// with a cheaper/more-expensive indicator.
+// with a cheaper/more-expensive indicator. When consumption data is available
+// it surfaces both the purchase-basis and the refined consumption-basis cost.
 export default function EggCostCard({ stats }: Props): ReactElement {
   const cheaper = stats.cheaperThanStore;
   const savings = Math.abs(stats.savingsPerDozen);
+  const consumption = stats.consumptionBasis;
 
   return (
     <div className="card card-body space-y-4">
@@ -35,7 +37,7 @@ export default function EggCostCard({ stats }: Props): ReactElement {
             {money(stats.costPerDozen)}
           </span>
           <span className="text-xs text-muted-foreground">
-            {money(stats.costPerEgg)} per egg
+            {money(stats.costPerEgg)} per egg · purchase basis
           </span>
         </div>
         <span
@@ -56,6 +58,37 @@ export default function EggCostCard({ stats }: Props): ReactElement {
         </span>{' '}
         per dozen vs. a store price of {money(stats.storePricePerDozen)}.
       </p>
+
+      {consumption && (
+        <div className="rounded-md border border-border bg-muted px-3 py-2.5">
+          <div className="flex items-baseline justify-between gap-3">
+            <div>
+              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Consumption basis
+              </span>
+              <span className="block text-2xl font-semibold text-foreground mt-0.5">
+                {money(consumption.costPerDozen)}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {money(consumption.costPerEgg)} per egg · feed actually fed
+              </span>
+            </div>
+            <span
+              className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                consumption.cheaperThanStore
+                  ? 'bg-success-100 text-success-700'
+                  : 'bg-warning-100 text-warning-700'
+              }`}
+            >
+              {consumption.cheaperThanStore ? 'Cheaper than store' : 'Pricier than store'}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground mt-2">
+            {consumption.poultryFeedConsumedLbs.toLocaleString()} lb consumed worth{' '}
+            {money(consumption.poultryFeedConsumedValue)}.
+          </p>
+        </div>
+      )}
 
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm border-t border-border pt-3">
         <div>
