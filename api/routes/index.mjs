@@ -1,4 +1,5 @@
 import { registerHealthRoutes } from "./health.mjs";
+import { registerStatsRoutes } from "./stats.mjs";
 import { registerPastureRoutes } from "./pastures.mjs";
 import { registerMovementRoutes } from "./movements.mjs";
 
@@ -8,6 +9,7 @@ import { registerMovementRoutes } from "./movements.mjs";
 // conflicts stay trivial.
 export function registerRoutes(app) {
   registerHealthRoutes(app);
+  registerStatsRoutes(app);
   registerPastureRoutes(app);
   registerMovementRoutes(app);
 }
