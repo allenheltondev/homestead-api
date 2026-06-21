@@ -4,15 +4,33 @@
 //
 // The skill only sends these on devices that report APL support; on
 // headless Echo devices the spoken response is unaffected.
+//
+// This module is the UNION of the herd visuals (home / herd summary /
+// confirmation) and the egg visuals (egg stats / egg cost). Both sets share
+// a single dark "homestead green" palette defined below.
 
-// Shared dark "homestead green" palette, duplicated per document so each
-// is a self-contained, renderable APL document.
+// Shared dark "homestead green" palette. The herd documents reference these
+// values through an APL `resources` block (`@colorBackground`, ...), while the
+// egg documents inline the hex values directly. `COLORS` exposes friendly
+// aliases (including the cost-badge colors) for the lib datasource builders.
+export const COLORS = {
+  background: "#15281d",
+  surface: "#1f3a2b",
+  primary: "#8fd19e",
+  accent: "#8fd19e",
+  text: "#f4f7f4",
+  muted: "#aebcb0",
+  cheaper: "#3fa66a",
+  expensive: "#c0563f",
+};
+
+// The `resources` shape the herd documents expect (`@colorX` lookups).
 const colors = {
-  colorBackground: "#15281d",
-  colorSurface: "#1f3a2b",
-  colorAccent: "#8fd19e",
-  colorText: "#f4f7f4",
-  colorMuted: "#aebcb0",
+  colorBackground: COLORS.background,
+  colorSurface: COLORS.surface,
+  colorAccent: COLORS.accent,
+  colorText: COLORS.text,
+  colorMuted: COLORS.muted,
 };
 
 function background() {
@@ -243,3 +261,110 @@ export const homeDocument = {
     ],
   },
 };
+
+// A simple header + stat-tile layout shared by both egg screens. The
+// datasource feeds title, subtitle, and an array of { label, value } stats.
+function statScreen(extraItems = []) {
+  return {
+    type: "APL",
+    version: "2024.2",
+    theme: "dark",
+    mainTemplate: {
+      parameters: ["payload"],
+      items: [
+        {
+          type: "Container",
+          width: "100vw",
+          height: "100vh",
+          direction: "column",
+          backgroundColor: COLORS.background,
+          paddingLeft: "@spacingLarge",
+          paddingRight: "@spacingLarge",
+          paddingTop: "@spacingLarge",
+          items: [
+            {
+              type: "Text",
+              text: "${payload.data.title}",
+              fontSize: "48dp",
+              fontWeight: "700",
+              color: COLORS.text,
+            },
+            {
+              type: "Text",
+              text: "${payload.data.subtitle}",
+              fontSize: "24dp",
+              color: COLORS.muted,
+              paddingBottom: "@spacingLarge",
+            },
+            {
+              type: "Container",
+              direction: "row",
+              data: "${payload.data.stats}",
+              numbered: true,
+              items: [
+                {
+                  type: "Container",
+                  width: "30vw",
+                  height: "40vh",
+                  backgroundColor: COLORS.surface,
+                  margin: "8dp",
+                  paddingTop: "@spacingLarge",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  items: [
+                    {
+                      type: "Text",
+                      text: "${data.value}",
+                      fontSize: "60dp",
+                      fontWeight: "700",
+                      color: COLORS.primary,
+                    },
+                    {
+                      type: "Text",
+                      text: "${data.label}",
+                      fontSize: "22dp",
+                      color: COLORS.muted,
+                    },
+                  ],
+                },
+              ],
+            },
+            ...extraItems,
+          ],
+        },
+      ],
+    },
+  };
+}
+
+// Egg stats screen: total eggs, dozens, and per-day rate as three stat tiles.
+export const eggStatsDocument = statScreen();
+
+// Egg cost screen: cost-per-dozen vs store price tiles plus a cheaper /
+// more-expensive badge bound to payload.data.badge.
+export const eggCostDocument = statScreen([
+  {
+    type: "Container",
+    direction: "row",
+    paddingTop: "@spacingLarge",
+    alignItems: "center",
+    items: [
+      {
+        type: "Frame",
+        backgroundColor: "${payload.data.badge.color}",
+        borderRadius: "20dp",
+        paddingLeft: "16dp",
+        paddingRight: "16dp",
+        paddingTop: "8dp",
+        paddingBottom: "8dp",
+        item: {
+          type: "Text",
+          text: "${payload.data.badge.text}",
+          fontSize: "24dp",
+          fontWeight: "700",
+          color: COLORS.text,
+        },
+      },
+    ],
+  },
+]);

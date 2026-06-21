@@ -1,19 +1,29 @@
-// APL helper: renders visual screens on Echo Show / Fire TV and other
-// APL-capable devices, and no-ops on headless Echo devices so the spoken
-// response is identical everywhere. Datasource builders are pure so they
-// unit-test without the ask-sdk.
+// APL helpers for the Homestead skill. Each `add*Screen` function gates on the
+// device's `Alexa.Presentation.APL` interface so the skill stays voice-only on
+// headless devices (Echo Dot, phone) and adds a visual screen only where it's
+// supported. The datasource builders are pure so they can be unit-tested
+// without ask-sdk.
+//
+// This module is the UNION of the herd visuals (home / herd summary / herd
+// count / confirmation) and the egg visuals (egg stats / egg cost).
 
 import {
   herdScreenDocument,
   confirmationDocument,
   homeDocument,
+  eggStatsDocument,
+  eggCostDocument,
+  COLORS,
 } from "../apl/documents.mjs";
 
 const APL_INTERFACE = "Alexa.Presentation.APL";
 
+// True when the requesting device supports APL. Reads the supported-interfaces
+// map off the request envelope, the same gate the rest of the skill uses.
 export function supportsApl(handlerInput) {
   const interfaces =
-    handlerInput?.requestEnvelope?.context?.System?.device?.supportedInterfaces;
+    handlerInput?.requestEnvelope?.context?.System?.device
+      ?.supportedInterfaces;
   return Boolean(interfaces && interfaces[APL_INTERFACE]);
 }
 
@@ -29,6 +39,10 @@ function render(handlerInput, token, document, datasources) {
     datasources,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Herd visuals (home / herd summary / herd count / confirmation)
+// ---------------------------------------------------------------------------
 
 function capitalize(value) {
   const text = String(value ?? "");
@@ -127,4 +141,81 @@ export function addConfirmationScreen(handlerInput, title, message) {
   return render(handlerInput, "confirmation", confirmationDocument, {
     confirmation: buildConfirmationData(title, message),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Egg visuals (egg stats / egg cost)
+// ---------------------------------------------------------------------------
+
+// Pure datasource builder for the egg-stats screen.
+export function buildEggStatsDatasource(stats) {
+  const count = stats?.count ?? 0;
+  const dozens = stats?.dozens ?? Math.floor(count / 12);
+  const perDay =
+    stats?.perDay != null && Number.isFinite(Number(stats.perDay))
+      ? Math.round(Number(stats.perDay))
+      : 0;
+  return {
+    data: {
+      title: "Egg Collection",
+      subtitle: stats?.periodLabel ?? "this month",
+      stats: [
+        { label: "eggs", value: String(count) },
+        { label: "dozen", value: String(dozens) },
+        { label: "per day", value: String(perDay) },
+      ],
+    },
+  };
+}
+
+// Pure datasource builder for the egg-cost screen, including the cheaper /
+// more-expensive badge.
+export function buildEggCostDatasource(cost) {
+  const perDozen = Number(cost?.costPerDozen);
+  const storePrice = Number(cost?.storePricePerDozen);
+  const fmt = (v) =>
+    Number.isFinite(v) ? (Number.isInteger(v) ? `$${v}` : `$${v.toFixed(2)}`) : "—";
+
+  let badge = { text: "no comparison", color: COLORS.surface };
+  if (Number.isFinite(perDozen) && Number.isFinite(storePrice)) {
+    if (perDozen < storePrice) {
+      badge = { text: "Cheaper than store", color: COLORS.cheaper };
+    } else if (perDozen > storePrice) {
+      badge = { text: "Pricier than store", color: COLORS.expensive };
+    } else {
+      badge = { text: "Same as store", color: COLORS.surface };
+    }
+  }
+
+  return {
+    data: {
+      title: "Egg Cost",
+      subtitle: cost?.periodLabel ?? "this month",
+      stats: [
+        { label: "your cost / dozen", value: fmt(perDozen) },
+        { label: "store / dozen", value: fmt(storePrice) },
+      ],
+      badge,
+    },
+  };
+}
+
+// Attaches the egg-stats screen to the response (when supported).
+export function addEggStatsScreen(handlerInput, stats) {
+  return render(
+    handlerInput,
+    "eggStatsToken",
+    eggStatsDocument,
+    buildEggStatsDatasource(stats),
+  );
+}
+
+// Attaches the egg-cost screen to the response (when supported).
+export function addEggCostScreen(handlerInput, cost) {
+  return render(
+    handlerInput,
+    "eggCostToken",
+    eggCostDocument,
+    buildEggCostDatasource(cost),
+  );
 }

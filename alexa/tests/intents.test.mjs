@@ -6,7 +6,12 @@ import { jest } from "@jest/globals";
 const getSummary = jest.fn();
 const getHerd = jest.fn();
 const recordBirth = jest.fn();
+const recordDeath = jest.fn();
+const moveAnimals = jest.fn();
 const recordFeedPurchase = jest.fn();
+const recordEggCollection = jest.fn();
+const getEggStats = jest.fn();
+const getEggCost = jest.fn();
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -27,7 +32,12 @@ jest.unstable_mockModule("../lib/api.mjs", () => ({
     getSummary,
     getHerd,
     recordBirth,
+    recordDeath,
+    moveAnimals,
     recordFeedPurchase,
+    recordEggCollection,
+    getEggStats,
+    getEggCost,
   }),
   ApiError,
   MissingTokenError,
@@ -38,8 +48,13 @@ const {
   LaunchRequestHandler,
   GetHerdSummaryIntentHandler,
   GetHerdCountIntentHandler,
+  LogFeedPurchaseIntentHandler,
+  LogEggCollectionIntentHandler,
   RecordBirthIntentHandler,
-  RecordFeedPurchaseIntentHandler,
+  RecordDeathIntentHandler,
+  MoveAnimalsIntentHandler,
+  GetEggStatsIntentHandler,
+  GetEggCostIntentHandler,
   HelpIntentHandler,
   CancelAndStopIntentHandler,
   FallbackIntentHandler,
@@ -48,9 +63,16 @@ const {
 } = await import("../handlers/intents.mjs");
 
 // Minimal responseBuilder mirroring the chainable ask-sdk surface used by
-// the handlers, recording what was spoken so assertions can inspect it.
+// the handlers, recording what was spoken / delegated / rendered so assertions
+// can inspect it.
 function makeResponseBuilder() {
-  const state = { speech: null, reprompt: null, linkAccount: false };
+  const state = {
+    speech: null,
+    reprompt: null,
+    linkAccount: false,
+    delegated: false,
+    directives: [],
+  };
   const builder = {
     speak(text) {
       state.speech = text;
@@ -64,6 +86,14 @@ function makeResponseBuilder() {
       state.linkAccount = true;
       return builder;
     },
+    addDelegateDirective() {
+      state.delegated = true;
+      return builder;
+    },
+    addDirective(directive) {
+      state.directives.push(directive);
+      return builder;
+    },
     getResponse() {
       return state;
     },
@@ -71,15 +101,25 @@ function makeResponseBuilder() {
   return builder;
 }
 
-function handlerInput(request) {
+// device toggles APL support so we can assert the gate.
+function handlerInput(request, { apl = false } = {}) {
   return {
-    requestEnvelope: { request },
+    requestEnvelope: {
+      request,
+      context: {
+        System: {
+          device: {
+            supportedInterfaces: apl ? { "Alexa.Presentation.APL": {} } : {},
+          },
+        },
+      },
+    },
     responseBuilder: makeResponseBuilder(),
   };
 }
 
-function intentRequest(name, slots = {}) {
-  return { type: "IntentRequest", intent: { name, slots } };
+function intentRequest(name, slots = {}, dialogState = "COMPLETED") {
+  return { type: "IntentRequest", dialogState, intent: { name, slots } };
 }
 
 beforeEach(() => {
@@ -92,10 +132,20 @@ describe("canHandle routing", () => {
       LaunchRequestHandler.canHandle(handlerInput({ type: "LaunchRequest" })),
     ).toBe(true);
   });
-  test("GetHerdSummaryIntent", () => {
+  test("new intents route", () => {
     expect(
-      GetHerdSummaryIntentHandler.canHandle(
-        handlerInput(intentRequest("GetHerdSummaryIntent")),
+      LogFeedPurchaseIntentHandler.canHandle(
+        handlerInput(intentRequest("LogFeedPurchaseIntent")),
+      ),
+    ).toBe(true);
+    expect(
+      LogEggCollectionIntentHandler.canHandle(
+        handlerInput(intentRequest("LogEggCollectionIntent")),
+      ),
+    ).toBe(true);
+    expect(
+      GetEggStatsIntentHandler.canHandle(
+        handlerInput(intentRequest("GetEggStatsIntent")),
       ),
     ).toBe(true);
   });
@@ -205,62 +255,179 @@ describe("GetHerdCountIntent", () => {
   });
 });
 
-describe("RecordBirthIntent", () => {
-  test("maps slots to POST /births and confirms", async () => {
-    recordBirth.mockResolvedValue({ animal: { species: "goat" } });
-    const res = await RecordBirthIntentHandler.handle(
+describe("dialog delegation (write intents)", () => {
+  test("LogFeedPurchase delegates while the dialog is incomplete", async () => {
+    const res = await LogFeedPurchaseIntentHandler.handle(
       handlerInput(
-        intentRequest("RecordBirthIntent", { species: { value: "goat" } }),
+        intentRequest("LogFeedPurchaseIntent", {}, "IN_PROGRESS"),
       ),
     );
-    expect(recordBirth).toHaveBeenCalledWith({ species: "goat" });
-    expect(res.speech).toMatch(/recorded the birth of a goat/);
+    expect(res.delegated).toBe(true);
+    expect(recordFeedPurchase).not.toHaveBeenCalled();
   });
 
-  test("reprompts when species is missing and does not call the API", async () => {
-    const res = await RecordBirthIntentHandler.handle(
-      handlerInput(intentRequest("RecordBirthIntent", {})),
-    );
-    expect(recordBirth).not.toHaveBeenCalled();
-    expect(res.reprompt).toMatch(/species/i);
-  });
-});
-
-describe("RecordFeedPurchaseIntent", () => {
-  test("maps slots to POST /feed-purchases and confirms", async () => {
+  test("LogFeedPurchase posts bags+weight when COMPLETED and confirms", async () => {
     recordFeedPurchase.mockResolvedValue({
-      type: "hay",
-      quantity: 10,
-      unit: "bale",
-      cost: 80,
+      bags: 4,
+      bagWeightLbs: 50,
+      feedType: "chicken",
     });
-    const res = await RecordFeedPurchaseIntentHandler.handle(
+    const res = await LogFeedPurchaseIntentHandler.handle(
       handlerInput(
-        intentRequest("RecordFeedPurchaseIntent", {
-          type: { value: "hay" },
-          quantity: { value: "10" },
-          unit: { value: "bales" },
-          cost: { value: "80" },
-          vendor: { value: "Co-op" },
+        intentRequest("LogFeedPurchaseIntent", {
+          bags: { value: "4" },
+          bagWeight: { value: "50" },
+          feedType: { value: "chicken" },
         }),
       ),
     );
     expect(recordFeedPurchase).toHaveBeenCalledWith({
-      type: "hay",
-      quantity: 10,
-      unit: "bale",
-      cost: 80,
-      vendor: "Co-op",
+      bags: 4,
+      bagWeightLbs: 50,
+      feedType: "chicken",
     });
-    expect(res.speech).toMatch(/recorded a feed purchase/);
+    expect(res.delegated).toBe(false);
+    expect(res.speech).toContain("4 fifty-pound bags of chicken feed");
   });
 
-  test("reprompts on a missing required slot", async () => {
-    const res = await RecordFeedPurchaseIntentHandler.handle(
-      handlerInput(intentRequest("RecordFeedPurchaseIntent", {})),
+  test("RecordBirth delegates while incomplete, posts when complete", async () => {
+    const inprog = await RecordBirthIntentHandler.handle(
+      handlerInput(intentRequest("RecordBirthIntent", {}, "STARTED")),
     );
-    expect(recordFeedPurchase).not.toHaveBeenCalled();
-    expect(res.reprompt).toBeTruthy();
+    expect(inprog.delegated).toBe(true);
+    expect(recordBirth).not.toHaveBeenCalled();
+
+    recordBirth.mockResolvedValue({ animal: { species: "goat" } });
+    const done = await RecordBirthIntentHandler.handle(
+      handlerInput(
+        intentRequest("RecordBirthIntent", {
+          species: { value: "goat" },
+          count: { value: "2" },
+        }),
+      ),
+    );
+    expect(recordBirth).toHaveBeenCalledWith({ species: "goat", count: 2 });
+    expect(done.speech).toMatch(/recorded the birth of a goat/);
+  });
+
+  test("RecordDeath delegates then posts", async () => {
+    const inprog = await RecordDeathIntentHandler.handle(
+      handlerInput(intentRequest("RecordDeathIntent", {}, "IN_PROGRESS")),
+    );
+    expect(inprog.delegated).toBe(true);
+
+    recordDeath.mockResolvedValue(null);
+    const done = await RecordDeathIntentHandler.handle(
+      handlerInput(
+        intentRequest("RecordDeathIntent", { animalRef: { value: "Bessie" } }),
+      ),
+    );
+    expect(recordDeath).toHaveBeenCalledWith({ animalRef: "Bessie" });
+    expect(done.speech).toMatch(/recorded that death/);
+  });
+
+  test("MoveAnimals delegates then posts and names group + pasture", async () => {
+    const inprog = await MoveAnimalsIntentHandler.handle(
+      handlerInput(intentRequest("MoveAnimalsIntent", {}, "IN_PROGRESS")),
+    );
+    expect(inprog.delegated).toBe(true);
+
+    moveAnimals.mockResolvedValue(null);
+    const done = await MoveAnimalsIntentHandler.handle(
+      handlerInput(
+        intentRequest("MoveAnimalsIntent", {
+          group: { value: "the goats" },
+          pasture: { value: "south field" },
+        }),
+      ),
+    );
+    expect(moveAnimals).toHaveBeenCalledWith({
+      group: "the goats",
+      pasture: "south field",
+    });
+    expect(done.speech).toContain("the goats");
+    expect(done.speech).toContain("south field");
+  });
+
+  test("LogEggCollection delegates then posts and confirms", async () => {
+    const inprog = await LogEggCollectionIntentHandler.handle(
+      handlerInput(intentRequest("LogEggCollectionIntent", {}, "IN_PROGRESS")),
+    );
+    expect(inprog.delegated).toBe(true);
+
+    recordEggCollection.mockResolvedValue({ count: 12 });
+    const done = await LogEggCollectionIntentHandler.handle(
+      handlerInput(
+        intentRequest("LogEggCollectionIntent", { count: { value: "a dozen" } }),
+      ),
+    );
+    expect(recordEggCollection).toHaveBeenCalledWith({ count: 12 });
+    expect(done.speech).toContain("12 eggs");
+  });
+
+  test("delegated write intents surface auth errors on COMPLETED", async () => {
+    recordFeedPurchase.mockRejectedValue(new MissingTokenError());
+    const res = await LogFeedPurchaseIntentHandler.handle(
+      handlerInput(
+        intentRequest("LogFeedPurchaseIntent", {
+          bags: { value: "1" },
+          bagWeight: { value: "50" },
+          feedType: { value: "chicken" },
+        }),
+      ),
+    );
+    expect(res.linkAccount).toBe(true);
+  });
+});
+
+describe("egg read intents + APL gating", () => {
+  test("GetEggStats speaks stats and renders APL on capable devices", async () => {
+    getEggStats.mockResolvedValue({
+      count: 84,
+      dozens: 7,
+      perDay: 3,
+      periodLabel: "this month",
+    });
+    const res = await GetEggStatsIntentHandler.handle(
+      handlerInput(intentRequest("GetEggStatsIntent"), { apl: true }),
+    );
+    expect(getEggStats).toHaveBeenCalledWith({});
+    expect(res.speech).toContain("84 eggs this month");
+    expect(res.directives).toHaveLength(1);
+    expect(res.directives[0].type).toBe(
+      "Alexa.Presentation.APL.RenderDocument",
+    );
+  });
+
+  test("GetEggStats stays voice-only on headless devices", async () => {
+    getEggStats.mockResolvedValue({ count: 10, perDay: 1 });
+    const res = await GetEggStatsIntentHandler.handle(
+      handlerInput(intentRequest("GetEggStatsIntent"), { apl: false }),
+    );
+    expect(res.directives).toHaveLength(0);
+    expect(res.speech).toBeTruthy();
+  });
+
+  test("GetEggStats passes the period slot through", async () => {
+    getEggStats.mockResolvedValue({ count: 5, perDay: 1 });
+    await GetEggStatsIntentHandler.handle(
+      handlerInput(
+        intentRequest("GetEggStatsIntent", { period: { value: "this week" } }),
+      ),
+    );
+    expect(getEggStats).toHaveBeenCalledWith({ period: "this week" });
+  });
+
+  test("GetEggCost speaks the break-even comparison + renders APL", async () => {
+    getEggCost.mockResolvedValue({
+      costPerDozen: 2.1,
+      storePricePerDozen: 4,
+    });
+    const res = await GetEggCostIntentHandler.handle(
+      handlerInput(intentRequest("GetEggCostIntent"), { apl: true }),
+    );
+    expect(res.speech).toContain("cheaper than the $4 store price");
+    expect(res.directives).toHaveLength(1);
   });
 });
 

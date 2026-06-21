@@ -1,0 +1,457 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "homestead",
+      "modelConfiguration": {
+        "fallbackIntentSensitivity": {
+          "level": "LOW"
+        }
+      },
+      "types": [
+        {
+          "name": "FeedType",
+          "values": [
+            {
+              "id": "chicken",
+              "name": {
+                "value": "chicken",
+                "synonyms": ["chicken", "layer", "layers", "poultry", "hen", "chickens", "chick"]
+              }
+            },
+            {
+              "id": "cattle",
+              "name": {
+                "value": "cattle",
+                "synonyms": ["cattle", "cow", "cows", "beef", "calf"]
+              }
+            },
+            {
+              "id": "goat",
+              "name": {
+                "value": "goat",
+                "synonyms": ["goat", "goats", "caprine", "kid"]
+              }
+            },
+            {
+              "id": "sheep",
+              "name": {
+                "value": "sheep",
+                "synonyms": ["sheep", "lamb", "ewe", "ovine"]
+              }
+            },
+            {
+              "id": "pig",
+              "name": {
+                "value": "pig",
+                "synonyms": ["pig", "pigs", "hog", "swine"]
+              }
+            },
+            {
+              "id": "horse",
+              "name": {
+                "value": "horse",
+                "synonyms": ["horse", "horses", "equine", "pony"]
+              }
+            },
+            {
+              "id": "hay",
+              "name": {
+                "value": "hay",
+                "synonyms": ["hay", "forage", "alfalfa"]
+              }
+            },
+            {
+              "id": "grain",
+              "name": {
+                "value": "grain",
+                "synonyms": ["grain", "corn", "feed corn"]
+              }
+            }
+          ]
+        }
+      ],
+      "intents": [
+        { "name": "AMAZON.CancelIntent", "samples": [] },
+        { "name": "AMAZON.HelpIntent", "samples": [] },
+        { "name": "AMAZON.StopIntent", "samples": [] },
+        { "name": "AMAZON.NavigateHomeIntent", "samples": [] },
+        { "name": "AMAZON.FallbackIntent", "samples": [] },
+        {
+          "name": "GetHerdSummaryIntent",
+          "samples": [
+            "for my homestead summary",
+            "how is my homestead doing",
+            "give me my summary",
+            "what's my homestead summary"
+          ]
+        },
+        {
+          "name": "GetHerdCountIntent",
+          "samples": [
+            "how many animals do I have",
+            "what's my herd count",
+            "how big is my herd",
+            "count my animals"
+          ]
+        },
+        {
+          "name": "LogFeedPurchaseIntent",
+          "slots": [
+            { "name": "bags", "type": "AMAZON.NUMBER" },
+            { "name": "bagWeight", "type": "AMAZON.NUMBER" },
+            { "name": "feedType", "type": "FeedType" },
+            { "name": "cost", "type": "AMAZON.NUMBER" },
+            { "name": "date", "type": "AMAZON.DATE" }
+          ],
+          "samples": [
+            "I bought {bags} {bagWeight} pound bags of {feedType} food {date}",
+            "I bought {bags} {bagWeight} pound bags of {feedType} feed",
+            "log {bags} {bagWeight} pound bags of {feedType} feed for {cost} dollars",
+            "I purchased {bags} bags of {feedType} feed",
+            "record a feed purchase of {feedType}",
+            "I bought food",
+            "I bought feed",
+            "log a feed purchase",
+            "record a feed purchase"
+          ]
+        },
+        {
+          "name": "LogEggCollectionIntent",
+          "slots": [
+            { "name": "count", "type": "AMAZON.NUMBER" },
+            { "name": "date", "type": "AMAZON.DATE" },
+            { "name": "coop", "type": "AMAZON.SearchQuery" }
+          ],
+          "samples": [
+            "I collected {count} eggs {date}",
+            "I collected {count} eggs",
+            "log {count} eggs from the {coop}",
+            "I gathered {count} eggs",
+            "log a dozen eggs",
+            "record {count} eggs",
+            "I collected eggs",
+            "log eggs"
+          ]
+        },
+        {
+          "name": "RecordBirthIntent",
+          "slots": [
+            { "name": "species", "type": "FeedType" },
+            { "name": "count", "type": "AMAZON.NUMBER" },
+            { "name": "dam", "type": "AMAZON.SearchQuery" },
+            { "name": "sire", "type": "AMAZON.SearchQuery" },
+            { "name": "date", "type": "AMAZON.DATE" }
+          ],
+          "samples": [
+            "record the birth of {count} {species} {date}",
+            "log {count} {species} born to {dam}",
+            "{count} {species} were born",
+            "a {species} was born",
+            "record a birth",
+            "log a birth"
+          ]
+        },
+        {
+          "name": "RecordDeathIntent",
+          "slots": [
+            { "name": "animalRef", "type": "AMAZON.SearchQuery" },
+            { "name": "cause", "type": "AMAZON.SearchQuery" },
+            { "name": "date", "type": "AMAZON.DATE" }
+          ],
+          "samples": [
+            "record the death of {animalRef} {date}",
+            "log that {animalRef} died from {cause}",
+            "{animalRef} died",
+            "record a death",
+            "log a death"
+          ]
+        },
+        {
+          "name": "MoveAnimalsIntent",
+          "slots": [
+            { "name": "group", "type": "AMAZON.SearchQuery" },
+            { "name": "pasture", "type": "AMAZON.SearchQuery" },
+            { "name": "date", "type": "AMAZON.DATE" }
+          ],
+          "samples": [
+            "move {group} to {pasture} {date}",
+            "move the {group} to the {pasture}",
+            "move animals to a pasture",
+            "move animals",
+            "log a move"
+          ]
+        },
+        {
+          "name": "GetEggStatsIntent",
+          "slots": [
+            { "name": "period", "type": "AMAZON.SearchQuery" }
+          ],
+          "samples": [
+            "how many eggs did I collect {period}",
+            "what are my egg stats {period}",
+            "egg stats",
+            "how are my eggs doing",
+            "how many eggs this month"
+          ]
+        },
+        {
+          "name": "GetEggCostIntent",
+          "slots": [
+            { "name": "period", "type": "AMAZON.SearchQuery" }
+          ],
+          "samples": [
+            "how much do my eggs cost {period}",
+            "what does a dozen eggs cost me",
+            "egg cost",
+            "what's my egg cost {period}",
+            "are my eggs cheaper than the store"
+          ]
+        }
+      ]
+    },
+    "dialog": {
+      "delegationStrategy": "ALWAYS",
+      "intents": [
+        {
+          "name": "LogFeedPurchaseIntent",
+          "confirmationRequired": true,
+          "prompts": {
+            "confirmation": "Confirm.Intent.LogFeedPurchase"
+          },
+          "slots": [
+            {
+              "name": "bags",
+              "type": "AMAZON.NUMBER",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.bags" }
+            },
+            {
+              "name": "bagWeight",
+              "type": "AMAZON.NUMBER",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.bagWeight" }
+            },
+            {
+              "name": "feedType",
+              "type": "FeedType",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.feedType" }
+            },
+            {
+              "name": "cost",
+              "type": "AMAZON.NUMBER",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            },
+            {
+              "name": "date",
+              "type": "AMAZON.DATE",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            }
+          ]
+        },
+        {
+          "name": "LogEggCollectionIntent",
+          "confirmationRequired": false,
+          "slots": [
+            {
+              "name": "count",
+              "type": "AMAZON.NUMBER",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.count" }
+            },
+            {
+              "name": "date",
+              "type": "AMAZON.DATE",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            },
+            {
+              "name": "coop",
+              "type": "AMAZON.SearchQuery",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            }
+          ]
+        },
+        {
+          "name": "RecordBirthIntent",
+          "confirmationRequired": true,
+          "prompts": { "confirmation": "Confirm.Intent.RecordBirth" },
+          "slots": [
+            {
+              "name": "species",
+              "type": "FeedType",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.species" }
+            },
+            {
+              "name": "count",
+              "type": "AMAZON.NUMBER",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.birthCount" }
+            },
+            {
+              "name": "dam",
+              "type": "AMAZON.SearchQuery",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            },
+            {
+              "name": "sire",
+              "type": "AMAZON.SearchQuery",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            },
+            {
+              "name": "date",
+              "type": "AMAZON.DATE",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            }
+          ]
+        },
+        {
+          "name": "RecordDeathIntent",
+          "confirmationRequired": true,
+          "prompts": { "confirmation": "Confirm.Intent.RecordDeath" },
+          "slots": [
+            {
+              "name": "animalRef",
+              "type": "AMAZON.SearchQuery",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.animalRef" }
+            },
+            {
+              "name": "cause",
+              "type": "AMAZON.SearchQuery",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            },
+            {
+              "name": "date",
+              "type": "AMAZON.DATE",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            }
+          ]
+        },
+        {
+          "name": "MoveAnimalsIntent",
+          "confirmationRequired": true,
+          "prompts": { "confirmation": "Confirm.Intent.MoveAnimals" },
+          "slots": [
+            {
+              "name": "group",
+              "type": "AMAZON.SearchQuery",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.group" }
+            },
+            {
+              "name": "pasture",
+              "type": "AMAZON.SearchQuery",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.pasture" }
+            },
+            {
+              "name": "date",
+              "type": "AMAZON.DATE",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            }
+          ]
+        }
+      ]
+    },
+    "prompts": [
+      {
+        "id": "Elicit.Slot.bags",
+        "variations": [
+          { "type": "PlainText", "value": "How many bags did you buy?" }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.bagWeight",
+        "variations": [
+          { "type": "PlainText", "value": "How many pounds is each bag?" }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.feedType",
+        "variations": [
+          { "type": "PlainText", "value": "What kind of feed was it? For example chicken, cattle, or goat." }
+        ]
+      },
+      {
+        "id": "Confirm.Intent.LogFeedPurchase",
+        "variations": [
+          { "type": "PlainText", "value": "{bags} {bagWeight} pound bags of {feedType} feed. Should I add it?" }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.count",
+        "variations": [
+          { "type": "PlainText", "value": "How many eggs did you collect?" }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.species",
+        "variations": [
+          { "type": "PlainText", "value": "What species was born?" }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.birthCount",
+        "variations": [
+          { "type": "PlainText", "value": "How many were born?" }
+        ]
+      },
+      {
+        "id": "Confirm.Intent.RecordBirth",
+        "variations": [
+          { "type": "PlainText", "value": "Record the birth of {count} {species}. Is that right?" }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.animalRef",
+        "variations": [
+          { "type": "PlainText", "value": "Which animal died?" }
+        ]
+      },
+      {
+        "id": "Confirm.Intent.RecordDeath",
+        "variations": [
+          { "type": "PlainText", "value": "Record the death of {animalRef}. Is that right?" }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.group",
+        "variations": [
+          { "type": "PlainText", "value": "Which group of animals do you want to move?" }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.pasture",
+        "variations": [
+          { "type": "PlainText", "value": "Which pasture should I move them to?" }
+        ]
+      },
+      {
+        "id": "Confirm.Intent.MoveAnimals",
+        "variations": [
+          { "type": "PlainText", "value": "Move {group} to {pasture}. Should I do that?" }
+        ]
+      }
+    ]
+  }
+}

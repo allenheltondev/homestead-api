@@ -68,16 +68,75 @@ describe("createApiClient", () => {
     expect(init.headers["Content-Type"]).toBe("application/json");
   });
 
-  test("recordFeedPurchase POSTs to /feed-purchases", async () => {
-    const fetchMock = mockFetch(201, { id: "1", type: "hay" });
+  test("recordFeedPurchase POSTs bags + bagWeightLbs to /feed-purchases", async () => {
+    const fetchMock = mockFetch(201, { id: "1" });
     global.fetch = fetchMock;
 
     const api = createApiClient(handlerInputWithToken("tok-abc"));
-    await api.recordFeedPurchase({ type: "hay" });
+    await api.recordFeedPurchase({
+      bags: 4,
+      bagWeightLbs: 50,
+      feedType: "chicken",
+    });
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.example.test/v1/feed-purchases");
     expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      bags: 4,
+      bagWeightLbs: 50,
+      feedType: "chicken",
+    });
+  });
+
+  test("recordEggCollection POSTs to /egg-collections", async () => {
+    const fetchMock = mockFetch(201, { id: "egg1", count: 9 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.recordEggCollection({ count: 9 });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.example.test/v1/egg-collections");
+    expect(init.method).toBe("POST");
+  });
+
+  test("getEggStats GETs /stats/eggs and appends the period query", async () => {
+    const fetchMock = mockFetch(200, { count: 84 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getEggStats({ period: "this month" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(
+      "https://api.example.test/v1/stats/eggs?period=this+month",
+    );
+    expect(init.method).toBe("GET");
+  });
+
+  test("getEggStats omits the query when no period is given", async () => {
+    const fetchMock = mockFetch(200, { count: 0 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getEggStats({});
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.example.test/v1/stats/eggs",
+    );
+  });
+
+  test("getEggCost GETs /stats/egg-cost", async () => {
+    const fetchMock = mockFetch(200, { costPerDozen: 2.1 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getEggCost({});
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.example.test/v1/stats/egg-cost",
+    );
   });
 
   test("throws MissingTokenError when unlinked", async () => {

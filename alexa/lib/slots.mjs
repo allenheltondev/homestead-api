@@ -41,92 +41,140 @@ function normalizeUnit(raw) {
   return UNIT_SYNONYMS[raw.trim().toLowerCase()];
 }
 
-// Builds the POST /births body. Only `species` is required by the API; status
-// defaults to active server-side. Optional name/breed/sex/dob are forwarded
-// when present.
-export function buildBirthFields(intent) {
-  const species = slotValue(intent, "species");
-  if (!species || !species.trim()) {
-    return {
-      ok: false,
-      reprompt: "What species was born? For example, a goat or a cow.",
-    };
+// Spoken-quantity words Alexa may surface as a literal string rather than a
+// resolved AMAZON.NUMBER (e.g. "a dozen eggs"). Map them to integers.
+const WORD_NUMBERS = {
+  "a dozen": 12,
+  dozen: 12,
+  "half dozen": 6,
+  "half a dozen": 6,
+  "a half dozen": 6,
+  "two dozen": 24,
+  "a couple": 2,
+  couple: 2,
+  "a few": 3,
+  none: 0,
+};
+
+// Parses a slot value into a number. Accepts numeric strings and the spoken
+// quantity words above ("a dozen" -> 12). Returns undefined when it can't.
+function parseCount(raw) {
+  if (raw == null) return undefined;
+  const direct = Number(raw);
+  if (Number.isFinite(direct)) return direct;
+  if (typeof raw === "string") {
+    const key = raw.trim().toLowerCase();
+    if (key in WORD_NUMBERS) return WORD_NUMBERS[key];
   }
-
-  const fields = { species: species.trim() };
-
-  const name = slotValue(intent, "name");
-  if (name && name.trim()) fields.name = name.trim();
-
-  const breed = slotValue(intent, "breed");
-  if (breed && breed.trim()) fields.breed = breed.trim();
-
-  const sex = slotValue(intent, "sex");
-  if (sex) {
-    const normalized = sex.trim().toLowerCase();
-    if (["female", "male", "unknown"].includes(normalized)) {
-      fields.sex = normalized;
-    }
-  }
-
-  const dob = slotValue(intent, "dob");
-  if (dob && /^\d{4}-\d{2}-\d{2}$/.test(dob.trim())) fields.dob = dob.trim();
-
-  return { ok: true, fields };
+  return undefined;
 }
 
-// Builds the POST /feed-purchases body. The API requires type, a positive
-// quantity, a known unit, a non-negative cost, and a vendor. We ask for any
-// missing required slot.
+// Returns a trimmed slot string when present and non-empty, else undefined.
+function textSlot(intent, name) {
+  const raw = slotValue(intent, name);
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
+  return undefined;
+}
+
+function isIsoDate(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+}
+
+// Builds the POST /feed-purchases body for the dialog-delegated
+// LogFeedPurchaseIntent. We pass bags + per-bag weight through verbatim and
+// let the server compute the total; nothing is computed here. The dialog model
+// guarantees the required slots are filled by the time COMPLETED fires, so
+// these builders read what's present and forward it.
 export function buildFeedFields(intent) {
-  const type = slotValue(intent, "type");
-  if (!type || !type.trim()) {
-    return {
-      ok: false,
-      reprompt: "What type of feed did you buy? For example, hay or grain.",
-    };
-  }
+  const bags = parseCount(slotValue(intent, "bags"));
+  const bagWeightLbs = parseCount(slotValue(intent, "bagWeight"));
+  const feedType = textSlot(intent, "feedType");
 
-  const quantityRaw = slotValue(intent, "quantity");
-  const quantity = Number(quantityRaw);
-  if (!Number.isFinite(quantity) || quantity <= 0) {
-    return {
-      ok: false,
-      reprompt: "How much did you buy? Please give a quantity.",
-    };
-  }
+  const fields = {};
+  if (Number.isFinite(bags)) fields.bags = bags;
+  if (Number.isFinite(bagWeightLbs)) fields.bagWeightLbs = bagWeightLbs;
+  if (feedType) fields.feedType = feedType;
 
-  const unit = normalizeUnit(slotValue(intent, "unit"));
-  if (!unit) {
-    return {
-      ok: false,
-      reprompt:
-        "What unit was that in? For example, pounds, bags, or bales.",
-    };
-  }
+  const cost = parseCount(slotValue(intent, "cost"));
+  if (Number.isFinite(cost)) fields.cost = cost;
 
-  const costRaw = slotValue(intent, "cost");
-  const cost = Number(costRaw);
-  if (!Number.isFinite(cost) || cost < 0) {
-    return {
-      ok: false,
-      reprompt: "How much did it cost?",
-    };
-  }
+  const date = slotValue(intent, "date");
+  if (isIsoDate(date)) fields.date = date.trim();
 
-  const vendorRaw = slotValue(intent, "vendor");
-  const vendor = vendorRaw && vendorRaw.trim() ? vendorRaw.trim() : "unknown";
-
-  return {
-    ok: true,
-    fields: {
-      type: type.trim(),
-      quantity,
-      unit,
-      cost,
-      vendor,
-    },
-  };
+  return fields;
 }
 
-export const __testables = { normalizeUnit };
+// Builds the POST /egg-collections body for LogEggCollectionIntent. "a dozen"
+// maps to 12 via parseCount.
+export function buildEggFields(intent) {
+  const count = parseCount(slotValue(intent, "count"));
+  const fields = {};
+  if (Number.isFinite(count)) fields.count = count;
+
+  const date = slotValue(intent, "date");
+  if (isIsoDate(date)) fields.date = date.trim();
+
+  const coop = textSlot(intent, "coop");
+  if (coop) fields.coop = coop;
+
+  return fields;
+}
+
+// Builds the POST /births body for the dialog-delegated RecordBirthIntent.
+export function buildBirthFields(intent) {
+  const species = textSlot(intent, "species");
+  const fields = {};
+  if (species) fields.species = species;
+
+  const count = parseCount(slotValue(intent, "count"));
+  if (Number.isFinite(count)) fields.count = count;
+
+  const dam = textSlot(intent, "dam");
+  if (dam) fields.dam = dam;
+
+  const sire = textSlot(intent, "sire");
+  if (sire) fields.sire = sire;
+
+  const date = slotValue(intent, "date");
+  if (isIsoDate(date)) fields.date = date.trim();
+
+  return fields;
+}
+
+// Builds the POST /deaths body for RecordDeathIntent.
+export function buildDeathFields(intent) {
+  const animalRef = textSlot(intent, "animalRef");
+  const fields = {};
+  if (animalRef) fields.animalRef = animalRef;
+
+  const cause = textSlot(intent, "cause");
+  if (cause) fields.cause = cause;
+
+  const date = slotValue(intent, "date");
+  if (isIsoDate(date)) fields.date = date.trim();
+
+  return fields;
+}
+
+// Builds the POST /moves body for MoveAnimalsIntent.
+export function buildMoveFields(intent) {
+  const group = textSlot(intent, "group");
+  const pasture = textSlot(intent, "pasture");
+  const fields = {};
+  if (group) fields.group = group;
+  if (pasture) fields.pasture = pasture;
+
+  const date = slotValue(intent, "date");
+  if (isIsoDate(date)) fields.date = date.trim();
+
+  return fields;
+}
+
+// Reads an optional free-text period slot ("this month", "this week") used by
+// the read-only egg stats/cost intents.
+export function buildPeriodQuery(intent) {
+  const period = textSlot(intent, "period");
+  return period ? { period } : {};
+}
+
+export const __testables = { normalizeUnit, parseCount };
