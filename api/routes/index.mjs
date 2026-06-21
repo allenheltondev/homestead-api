@@ -1,4 +1,5 @@
 import { registerHealthRoutes } from "./health.mjs";
+import { registerStatsRoutes } from "./stats.mjs";
 
 // Single shared route-registration point. Each feature stream adds ONE
 // import line above and ONE registration line below, so wiring a new
@@ -6,4 +7,5 @@ import { registerHealthRoutes } from "./health.mjs";
 // conflicts stay trivial.
 export function registerRoutes(app) {
   registerHealthRoutes(app);
+  registerStatsRoutes(app);
 }
