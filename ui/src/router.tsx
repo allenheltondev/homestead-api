@@ -11,6 +11,7 @@ import AnimalNew from './routes/AnimalNew';
 import Pastures from './routes/Pastures';
 import PastureDetail from './routes/PastureDetail';
 import Feed from './routes/Feed';
+import Eggs from './routes/Eggs';
 
 export const router = createBrowserRouter([
   {
@@ -40,6 +41,7 @@ export const router = createBrowserRouter([
       { path: 'pastures', element: <Pastures /> },
       { path: 'pastures/:pastureId', element: <PastureDetail /> },
       { path: 'feed', element: <Feed /> },
+      { path: 'eggs', element: <Eggs /> },
     ],
   },
 ]);

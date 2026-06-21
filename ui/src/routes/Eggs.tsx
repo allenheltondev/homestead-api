@@ -1,20 +1,34 @@
 import type { ReactElement } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useApiFetch, ApiError } from '../auth/useApiFetch';
-import { createFeedPurchase, deleteFeedPurchase, listFeedPurchases } from '../api/feed';
-import type { CreateFeedPurchaseRequest, FeedPurchase } from '../api/types';
+import {
+  createEggCollection,
+  deleteEggCollection,
+  listEggCollections,
+} from '../api/eggs';
+import { getEggCost } from '../api/stats';
+import type {
+  CreateEggCollectionRequest,
+  EggCollection,
+  EggCostStats,
+} from '../api/types';
 import Modal from '../components/Modal';
-import RegisterFeedPurchaseForm from '../components/RegisterFeedPurchaseForm';
-import { formatMoney, formatShortDate } from '../components/format';
+import RegisterEggCollectionForm from '../components/RegisterEggCollectionForm';
+import EggsChart from '../components/EggsChart';
+import EggCostCard from '../components/EggCostCard';
+import { formatShortDate } from '../components/format';
 
-export default function Feed(): ReactElement {
+const DEFAULT_STORE_PRICE = 4;
+
+export default function Eggs(): ReactElement {
   const apiFetch = useApiFetch();
-  const [purchases, setPurchases] = useState<FeedPurchase[] | null>(null);
+  const [collections, setCollections] = useState<EggCollection[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [eggCost, setEggCost] = useState<EggCostStats | null>(null);
 
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
-  const [type, setType] = useState('');
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
@@ -25,38 +39,45 @@ export default function Feed(): ReactElement {
   const reload = useCallback((): (() => void) => {
     let cancelled = false;
     setError(null);
-    setPurchases(null);
-    listFeedPurchases(apiFetch, {
+    setCollections(null);
+    listEggCollections(apiFetch, {
       from: from || undefined,
       to: to || undefined,
-      type: type.trim() || undefined,
     })
       .then((res) => {
-        if (!cancelled) setPurchases(res.feed_purchases);
+        if (!cancelled) setCollections(res.egg_collections);
       })
       .catch((err: Error) => {
         if (!cancelled) setError(err.message);
       });
+
+    // Best-effort: the cost-per-dozen card is independent of the history list.
+    getEggCost(apiFetch, undefined, DEFAULT_STORE_PRICE)
+      .then((res) => {
+        if (!cancelled) setEggCost(res);
+      })
+      .catch(() => {
+        if (!cancelled) setEggCost(null);
+      });
+
     return () => {
       cancelled = true;
     };
-  }, [apiFetch, from, to, type]);
+  }, [apiFetch, from, to]);
 
   useEffect(() => reload(), [reload]);
 
   const totals = useMemo(() => {
-    if (!purchases) return { cost: 0, count: 0 };
-    return {
-      cost: purchases.reduce((sum, p) => sum + p.cost, 0),
-      count: purchases.length,
-    };
-  }, [purchases]);
+    if (!collections) return { eggs: 0, dozens: 0, count: 0 };
+    const eggs = collections.reduce((sum, c) => sum + c.count, 0);
+    return { eggs, dozens: Math.round((eggs / 12) * 10) / 10, count: collections.length };
+  }, [collections]);
 
-  const handleCreate = async (payload: CreateFeedPurchaseRequest): Promise<void> => {
+  const handleCreate = async (payload: CreateEggCollectionRequest): Promise<void> => {
     setCreateBusy(true);
     setCreateError(null);
     try {
-      await createFeedPurchase(apiFetch, payload);
+      await createEggCollection(apiFetch, payload);
       setCreateOpen(false);
       reload();
     } catch (err) {
@@ -69,7 +90,7 @@ export default function Feed(): ReactElement {
   const handleDelete = async (id: string): Promise<void> => {
     setDeletingId(id);
     try {
-      await deleteFeedPurchase(apiFetch, id);
+      await deleteEggCollection(apiFetch, id);
       reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : (err as Error).message);
@@ -79,9 +100,14 @@ export default function Feed(): ReactElement {
   };
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-6">
       <header className="flex items-start justify-between gap-4">
-        <h1 className="text-2xl font-semibold text-foreground">Feed</h1>
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold text-foreground">Eggs</h1>
+          <p className="text-muted-foreground">
+            Log collections and track your cost per dozen.
+          </p>
+        </div>
         <button
           type="button"
           className="btn-primary"
@@ -90,9 +116,31 @@ export default function Feed(): ReactElement {
             setCreateOpen(true);
           }}
         >
-          Record purchase
+          Log eggs
         </button>
       </header>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-foreground">Cost analytics</h2>
+          {eggCost ? (
+            <EggCostCard stats={eggCost} />
+          ) : (
+            <p className="rounded-md bg-muted text-muted-foreground text-sm text-center py-6">
+              Cost analytics are unavailable right now.
+            </p>
+          )}
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-foreground">Eggs over time</h2>
+          {collections === null ? (
+            <p className="text-muted-foreground">Loading...</p>
+          ) : (
+            <EggsChart collections={collections} />
+          )}
+        </section>
+      </div>
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-sm">
@@ -113,24 +161,13 @@ export default function Feed(): ReactElement {
             onChange={(e) => setTo(e.target.value)}
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground">Type</span>
-          <input
-            type="text"
-            className="input w-auto py-1.5"
-            value={type}
-            placeholder="hay, grain, ..."
-            onChange={(e) => setType(e.target.value)}
-          />
-        </label>
-        {(from || to || type) && (
+        {(from || to) && (
           <button
             type="button"
             className="btn-ghost btn-sm"
             onClick={() => {
               setFrom('');
               setTo('');
-              setType('');
             }}
           >
             Clear
@@ -138,51 +175,48 @@ export default function Feed(): ReactElement {
         )}
       </div>
 
-      {purchases && purchases.length > 0 && (
+      {collections && collections.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <Tile label="Total spend" value={formatMoney(totals.cost)} />
-          <Tile label="Purchases" value={String(totals.count)} />
+          <Tile label="Total eggs" value={String(totals.eggs)} />
+          <Tile label="Dozens" value={String(totals.dozens)} />
+          <Tile label="Collections" value={String(totals.count)} />
         </div>
       )}
 
       {error && <p className="form-error">{error}</p>}
-      {purchases === null && !error && <p className="text-muted-foreground">Loading...</p>}
-      {purchases && purchases.length === 0 && (
-        <p className="text-muted-foreground text-sm">No feed purchases match these filters.</p>
+      {collections === null && !error && (
+        <p className="text-muted-foreground">Loading...</p>
       )}
-      {purchases && purchases.length > 0 && (
+      {collections && collections.length === 0 && (
+        <p className="text-muted-foreground text-sm">
+          No egg collections match these filters.
+        </p>
+      )}
+      {collections && collections.length > 0 && (
         <div className="overflow-x-auto">
           <table className="data-table">
             <thead>
               <tr>
-                <th>Purchased</th>
-                <th>Type</th>
-                <th>Bags</th>
-                <th>Total</th>
-                <th>Cost</th>
+                <th>Collected</th>
+                <th>Count</th>
+                <th>Coop</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {purchases.map((p) => (
-                <tr key={p.id}>
-                  <td className="text-muted-foreground">{formatShortDate(p.purchasedAt)}</td>
-                  <td>{p.type}</td>
-                  <td className="text-muted-foreground">
-                    {p.bags != null && p.bagWeightLbs != null
-                      ? `${p.bags} × ${p.bagWeightLbs} lb`
-                      : '—'}
-                  </td>
-                  <td className="text-muted-foreground">{formatFeedTotal(p)}</td>
-                  <td>{formatMoney(p.cost)}</td>
+              {collections.map((c) => (
+                <tr key={c.id}>
+                  <td className="text-muted-foreground">{formatShortDate(c.date)}</td>
+                  <td>{c.count}</td>
+                  <td className="text-muted-foreground">{c.coop ?? '—'}</td>
                   <td className="text-right">
                     <button
                       type="button"
                       className="btn-link text-error-600 hover:text-error-700"
-                      onClick={() => void handleDelete(p.id)}
-                      disabled={deletingId === p.id}
+                      onClick={() => void handleDelete(c.id)}
+                      disabled={deletingId === c.id}
                     >
-                      {deletingId === p.id ? 'Removing...' : 'Delete'}
+                      {deletingId === c.id ? 'Removing...' : 'Delete'}
                     </button>
                   </td>
                 </tr>
@@ -194,10 +228,10 @@ export default function Feed(): ReactElement {
 
       <Modal
         open={createOpen}
-        title="Record feed purchase"
+        title="Log egg collection"
         onClose={() => (!createBusy ? setCreateOpen(false) : undefined)}
       >
-        <RegisterFeedPurchaseForm
+        <RegisterEggCollectionForm
           busy={createBusy}
           serverError={createError}
           onSubmit={(p) => void handleCreate(p)}
@@ -206,17 +240,6 @@ export default function Feed(): ReactElement {
       </Modal>
     </section>
   );
-}
-
-// Prefer the server-computed total lbs; fall back to bags*weight, then the
-// legacy quantity/unit fields for older records.
-function formatFeedTotal(p: FeedPurchase): string {
-  if (p.totalLbs != null) return `${p.totalLbs.toLocaleString()} lb`;
-  if (p.bags != null && p.bagWeightLbs != null) {
-    return `${(p.bags * p.bagWeightLbs).toLocaleString()} lb`;
-  }
-  if (p.quantity != null) return `${p.quantity} ${p.unit ?? ''}`.trim();
-  return '—';
 }
 
 function Tile({ label, value }: { label: string; value: string }): ReactElement {

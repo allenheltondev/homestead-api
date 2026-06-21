@@ -2,15 +2,17 @@ import type { ReactElement, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApiFetch } from '../auth/useApiFetch';
-import { getFeedStats, getStatsSummary } from '../api/stats';
-import type { FeedStats, StatsSummary } from '../api/types';
+import { getEggCost, getFeedStats, getStatsSummary } from '../api/stats';
+import type { EggCostStats, FeedStats, StatsSummary } from '../api/types';
 import HerdChart from '../components/HerdChart';
 import FeedSpendChart from '../components/FeedSpendChart';
+import EggCostCard from '../components/EggCostCard';
 import { formatMoney } from '../components/format';
 
 interface DashboardData {
   summary: StatsSummary;
   feed: FeedStats | null;
+  eggCost: EggCostStats | null;
 }
 
 export default function Home(): ReactElement {
@@ -27,10 +29,12 @@ export default function Home(): ReactElement {
       getStatsSummary(apiFetch),
       // Best-effort: drives the per-type spend chart for the current month.
       getFeedStats(apiFetch).catch(() => null),
+      // Best-effort: cost-per-dozen card for the current month.
+      getEggCost(apiFetch).catch(() => null),
     ])
-      .then(([summary, feed]) => {
+      .then(([summary, feed, eggCost]) => {
         if (cancelled) return;
-        setData({ summary, feed });
+        setData({ summary, feed, eggCost });
       })
       .catch((err: Error) => {
         if (!cancelled) setError(err.message);
@@ -59,7 +63,7 @@ export default function Home(): ReactElement {
     );
   }
 
-  const { summary, feed } = data;
+  const { summary, feed, eggCost } = data;
   const noData = summary.herd.totalAnimals === 0 && summary.pastures.total === 0;
 
   if (noData) {
@@ -116,6 +120,23 @@ export default function Home(): ReactElement {
             </Link>
           }
         />
+        <StatCard
+          label="Eggs this month"
+          value={String(summary.eggs.thisMonth)}
+          sub={
+            <span className="text-muted-foreground">{summary.eggs.thisWeek} this week</span>
+          }
+        />
+        <StatCard
+          label="Cost per dozen"
+          value={formatMoney(summary.eggCost.costPerDozenThisMonth)}
+          accent={summary.eggCost.cheaperThanStore ? 'success' : 'warning'}
+          sub={
+            <Link to="/eggs" className="text-primary-600 hover:underline">
+              {summary.eggCost.cheaperThanStore ? 'Cheaper than store' : 'View eggs'}
+            </Link>
+          }
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -154,12 +175,25 @@ export default function Home(): ReactElement {
         </PanelCard>
       </div>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-foreground">
-          Feed spend by type · {summary.asOf.month}
-        </h2>
-        <FeedSpendChart byType={feed?.byType ?? {}} />
-      </section>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-foreground">
+            Feed spend by type · {summary.asOf.month}
+          </h2>
+          <FeedSpendChart byType={feed?.byType ?? {}} />
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-foreground">Egg cost per dozen</h2>
+          {eggCost ? (
+            <EggCostCard stats={eggCost} />
+          ) : (
+            <p className="rounded-md bg-muted text-muted-foreground text-sm text-center py-6">
+              Log egg collections and a poultry feed purchase to see your cost per dozen.
+            </p>
+          )}
+        </section>
+      </div>
     </section>
   );
 }
