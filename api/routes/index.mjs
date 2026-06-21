@@ -3,6 +3,7 @@ import { registerStatsRoutes } from "./stats.mjs";
 import { registerPastureRoutes } from "./pastures.mjs";
 import { registerMovementRoutes } from "./movements.mjs";
 import { registerFeedRoutes } from "./feed.mjs";
+import { registerAnimalRoutes } from "./animals.mjs";
 
 // Single shared route-registration point. Each feature stream adds ONE
 // import line above and ONE registration line below, so wiring a new
@@ -14,4 +15,5 @@ export function registerRoutes(app) {
   registerPastureRoutes(app);
   registerMovementRoutes(app);
   registerFeedRoutes(app);
+  registerAnimalRoutes(app);
 }
