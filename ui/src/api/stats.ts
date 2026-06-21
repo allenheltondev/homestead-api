@@ -2,6 +2,7 @@ import type { ApiFetch } from '../auth/useApiFetch';
 import type {
   EggCostStats,
   EggStats,
+  FeedInventoryStats,
   FeedStats,
   HerdStats,
   LifecycleStats,
@@ -64,4 +65,10 @@ export async function getEggCost(
 
 export async function getStatsSummary(apiFetch: ApiFetch): Promise<StatsSummary> {
   return apiFetch<StatsSummary>('/stats/summary');
+}
+
+// Per-type feed on-hand position plus a burn-down forecast (days remaining and
+// projected run-out date) derived from purchases and logged consumption.
+export async function getFeedInventory(apiFetch: ApiFetch): Promise<FeedInventoryStats> {
+  return apiFetch<FeedInventoryStats>('/stats/feed-inventory');
 }
