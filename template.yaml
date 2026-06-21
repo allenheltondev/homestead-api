@@ -82,6 +82,26 @@ Parameters:
       analytics (GET /stats/egg-cost, /stats/summary). Surfaced to the API
       Lambda as STORE_EGG_PRICE_PER_DOZEN; a per-request storePricePerDozen
       query param overrides it.
+  DigestSenderEmail:
+    Type: String
+    Default: ""
+    Description: |
+      Optional verified SES "from" address for the scheduled weekly digest
+      email. When both DigestSenderEmail and DigestRecipientEmail are set the
+      DigestFunction emails the digest; otherwise it logs it. The digest event
+      (HomesteadDigest) is always published regardless.
+  DigestRecipientEmail:
+    Type: String
+    Default: ""
+    Description: |
+      Optional "to" address for the scheduled weekly digest email. See
+      DigestSenderEmail.
+  DigestSchedule:
+    Type: String
+    Default: "cron(0 18 ? * SUN *)"
+    Description: |
+      Schedule expression for the weekly digest function. Defaults to Sundays
+      at 18:00 UTC. Override to change cadence.
 
 # Combined condition so partial-set (one param without the other) is a
 # no-op rather than a deploy error.
@@ -302,6 +322,60 @@ Resources:
           ALEXA_CLIENT_ID: !Ref AlexaUserPoolClientId
       Policies:
         - AWSLambdaBasicExecutionRole
+
+  # Scheduled weekly digest. Shares the api/ CodeUri but has its own esbuild
+  # entry point (digest.mjs) so it doesn't pull in the full route bundle. On
+  # its schedule it composes the weekly digest, always publishes a
+  # HomesteadDigest event, and (when DIGEST_SENDER + DIGEST_RECIPIENT are set)
+  # emails it via SES. Needs DynamoDB read on the table/indexes (the stats
+  # aggregations it composes), events:PutEvents, and ses:SendEmail.
+  DigestFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        <<: *esbuild-properties
+        EntryPoints:
+          - digest.mjs
+    Properties:
+      CodeUri: api
+      Handler: digest.handler
+      Environment:
+        Variables:
+          DIGEST_SENDER: !Ref DigestSenderEmail
+          DIGEST_RECIPIENT: !Ref DigestRecipientEmail
+          STORE_EGG_PRICE_PER_DOZEN: !Ref StoreEggPricePerDozen
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: 2012-10-17
+          Statement:
+            # DynamoDB read on the table + its indexes (read-only stats). No
+            # Scan anywhere.
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:BatchGetItem
+              Resource:
+                - !GetAtt HomesteadTable.Arn
+                - !Sub "${HomesteadTable.Arn}/index/*"
+            # EventBridge: publish the HomesteadDigest event to the default bus.
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource:
+                - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/default"
+            # SES: send the digest email when configured.
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: "*"
+      Events:
+        WeeklySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref DigestSchedule
 
   # Alexa skill backend. Its own CodeUri (alexa/) and esbuild entry point so
   # it ships ask-sdk-core without pulling in the API route/domain bundle. The

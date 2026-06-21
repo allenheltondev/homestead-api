@@ -174,6 +174,124 @@ export async function deathStats(months) {
   return { type: "death", months, total };
 }
 
+// --- Mortality / health analytics --------------------------------------
+// Queries the EVENT#DEATH#<yyyy-mm> reporting partitions (pattern 8) for the
+// period and tallies deaths by cause from the death event payload. Unlike
+// deathStats (a COUNT Query), this pulls the items so it can read each
+// event's `cause` attribute. lossRate approximates deaths over the average
+// active herd size, using the current active count as the denominator (a
+// personal-scale approximation -- no historical herd snapshots are kept).
+// No Scans: deaths come from GSI1 partitions, the active count from the GSI2
+// animal collection.
+export async function mortalityStats(period, months) {
+  const [deathEvents, herd] = await Promise.all([
+    deathEventsForMonths(months),
+    herdStats(),
+  ]);
+
+  const byCauseMap = {};
+  let totalDeaths = 0;
+  for (const event of deathEvents) {
+    totalDeaths += 1;
+    const cause = typeof event.cause === "string" && event.cause.length > 0
+      ? event.cause
+      : "unknown";
+    byCauseMap[cause] = (byCauseMap[cause] ?? 0) + 1;
+  }
+
+  const byCause = Object.entries(byCauseMap)
+    .map(([cause, count]) => ({ cause, count }))
+    .sort((a, b) => b.count - a.count || a.cause.localeCompare(b.cause));
+
+  // Average active herd size approximated by the current active count. Deaths
+  // are added back so the denominator reflects animals that were alive during
+  // the period rather than only the survivors, avoiding a divide-by-zero when
+  // every active animal died.
+  const activeNow = herd.byStatus.active;
+  const denominator = activeNow + totalDeaths;
+  const lossRate = denominator > 0 ? totalDeaths / denominator : 0;
+
+  return { period, totalDeaths, byCause, lossRate };
+}
+
+// Queries every EVENT#DEATH#<yyyy-mm> partition in the months list (pattern
+// 8) and returns the flat list of death event items (so callers can read
+// `cause`). No Scan.
+async function deathEventsForMonths(months) {
+  const batches = await Promise.all(
+    months.map((month) =>
+      queryAll({
+        TableName: TABLE_NAME,
+        IndexName: "GSI1",
+        KeyConditionExpression: "gsi1pk = :pk",
+        ExpressionAttributeValues: { ":pk": `EVENT#DEATH#${month}` },
+      }),
+    ),
+  );
+  return batches.flat();
+}
+
+// Mortality block shaped for composition (digest/summary): the headline loss
+// rate plus the single top cause (null when there were no deaths).
+export async function mortalitySummary(period, months) {
+  const { totalDeaths, byCause, lossRate } = await mortalityStats(period, months);
+  return {
+    totalDeaths,
+    lossRate,
+    topCause: byCause.length > 0 ? byCause[0].cause : null,
+  };
+}
+
+// --- Health expense analytics ------------------------------------------
+// Aggregates HEALTHEXP#<yyyy-mm> expense rows (pattern 18) for the period:
+// total spend, spend grouped by category, and a per-animal figure (total
+// spend over the current active animal count). Queries the month partitions
+// for the period and the GSI2 animal collection -- no Scans.
+export async function healthStats(period, months) {
+  const [expenses, herd] = await Promise.all([
+    healthExpensesForMonths(months),
+    herdStats(),
+  ]);
+
+  const byCategoryMap = {};
+  let totalSpend = 0;
+  for (const expense of expenses) {
+    const category = typeof expense.category === "string" && expense.category.length > 0
+      ? expense.category
+      : "unknown";
+    const cost = Number(expense.cost) || 0;
+    byCategoryMap[category] = (byCategoryMap[category] ?? 0) + cost;
+    totalSpend += cost;
+  }
+
+  const byCategory = Object.entries(byCategoryMap)
+    .map(([category, amount]) => ({ category, amount }))
+    .sort((a, b) => b.amount - a.amount || a.category.localeCompare(b.category));
+
+  const activeAnimals = herd.byStatus.active;
+  const perAnimal = activeAnimals > 0 ? totalSpend / activeAnimals : null;
+
+  return { period, totalSpend, byCategory, perAnimal };
+}
+
+// Queries every HEALTHEXP#<yyyy-mm> partition in the months list (pattern 18)
+// and returns the flat list of expense rows. No Scan.
+async function healthExpensesForMonths(months) {
+  const batches = await Promise.all(
+    months.map((month) =>
+      queryAll({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": `HEALTHEXP#${month}`,
+          ":sk": "EXP#",
+        },
+      }),
+    ),
+  );
+  return batches.flat();
+}
+
 // --- Feed by period -----------------------------------------------------
 // Feed purchases partition by month on the base table (pk = FEED#<yyyy-mm>).
 // We Query each month in the period and sum cost + quantity grouped by
@@ -220,7 +338,7 @@ export async function feedStats(months) {
 // We Query each month in the period and sum the counts. `days` is the count
 // of distinct collection days; `perDay` is the average eggs per collection
 // day (0 when there were none). No Scans.
-export async function eggStats(months) {
+export async function eggStats(months, { flock } = {}) {
   const batches = await Promise.all(
     months.map((month) =>
       queryAll({
@@ -238,6 +356,9 @@ export async function eggStats(months) {
   const collectionDays = new Set();
 
   for (const collection of batches.flat()) {
+    // Per-flock attribution restricts the tally to one coop (the flock key);
+    // the default (no flock) counts every collection, unchanged.
+    if (flock !== undefined && collection.coop !== flock) continue;
     totalEggs += Number(collection.count) || 0;
     const collectedAt = collection.collectedAt;
     if (typeof collectedAt === "string") {
@@ -276,11 +397,11 @@ export async function eggStatsForPeriod(period, months) {
 //
 // Both leave cost figures null when there are no qualifying dozens so callers
 // never divide by zero. The store comparison uses the resolved store price.
-export async function eggCostStats(period, months, { storePricePerDozen } = {}) {
+export async function eggCostStats(period, months, { storePricePerDozen, flock } = {}) {
   const [{ totalEggs, dozens }, poultryFeedSpend, consumptionBasis] = await Promise.all([
-    eggStats(months),
-    poultryFeedSpendForMonths(months),
-    poultryConsumptionBasis(months, storePricePerDozen),
+    eggStats(months, { flock }),
+    poultryFeedSpendForMonths(months, { flock }),
+    poultryConsumptionBasis(months, storePricePerDozen, { flock }),
   ]);
 
   const storePrice = resolveStorePricePerDozen(storePricePerDozen);
@@ -299,7 +420,7 @@ export async function eggCostStats(period, months, { storePricePerDozen } = {}) 
     costPerEgg = poultryFeedSpend / totalEggs;
   }
 
-  return {
+  const out = {
     period,
     eggs: totalEggs,
     dozens,
@@ -311,6 +432,58 @@ export async function eggCostStats(period, months, { storePricePerDozen } = {}) 
     cheaperThanStore,
     consumptionBasis,
   };
+  // Only surface the flock dimension when one was requested so the default
+  // payload shape is byte-for-byte unchanged.
+  if (flock !== undefined) out.flock = flock;
+  return out;
+}
+
+// Per-flock egg cost rollup. Discovers the set of flocks (coop values) seen
+// in the period's egg collections, then computes a cost-per-dozen row for
+// each by restricting eggs to that coop and poultry feed to that flock.
+// Returns one row per flock, sorted by flock key. No Scans (egg + feed month
+// partitions only).
+export async function eggCostByFlock(period, months, { storePricePerDozen } = {}) {
+  const flocks = await flocksForMonths(months);
+  const rows = await Promise.all(
+    flocks.map(async (flock) => {
+      const stats = await eggCostStats(period, months, { storePricePerDozen, flock });
+      return {
+        flock,
+        dozens: stats.dozens,
+        poultryFeedSpend: stats.poultryFeedSpend,
+        costPerDozen: stats.costPerDozen,
+        consumptionBasis: stats.consumptionBasis,
+      };
+    }),
+  );
+  return rows.sort((a, b) => a.flock.localeCompare(b.flock));
+}
+
+// The distinct, non-empty coop values across the period's egg collections.
+// Drives the by-flock grouping. Queries the egg month partitions (pattern
+// 14) -- no Scan.
+async function flocksForMonths(months) {
+  const batches = await Promise.all(
+    months.map((month) =>
+      queryAll({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": `EGG#${month}`,
+          ":sk": "COLLECT#",
+        },
+      }),
+    ),
+  );
+
+  const flocks = new Set();
+  for (const collection of batches.flat()) {
+    if (typeof collection.coop === "string" && collection.coop.length > 0) {
+      flocks.add(collection.coop);
+    }
+  }
+  return [...flocks];
 }
 
 // Builds the consumption-basis cost-per-dozen block (see eggCostStats).
@@ -322,28 +495,29 @@ export async function eggCostStats(period, months, { storePricePerDozen } = {}) 
 // - layMonths: months in the period that have at least one egg collection.
 // - dozens: dozens collected in those lay months only.
 // - costPerDozen: consumedValue / dozens; null when either input is null/0.
-async function poultryConsumptionBasis(months, storePricePerDozen) {
+async function poultryConsumptionBasis(months, storePricePerDozen, { flock } = {}) {
   const [purchases, consumption, perMonthEggs] = await Promise.all([
     feedPurchasesForMonths(months),
     feedConsumptionForMonths(months),
-    Promise.all(months.map((m) => eggStats([m]))),
+    Promise.all(months.map((m) => eggStats([m], { flock }))),
   ]);
 
-  // Average poultry purchase unit cost ($/lb) over the period.
+  // Average poultry purchase unit cost ($/lb) over the period. When a flock
+  // is requested, only purchases tagged with that flock count.
   let purchasedLbs = 0;
   let purchaseCost = 0;
   for (const purchase of purchases) {
-    if (purchaseFeedType(purchase) === "poultry") {
+    if (purchaseFeedType(purchase) === "poultry" && matchesFlock(purchase, flock)) {
       purchasedLbs += purchaseLbs(purchase);
       purchaseCost += Number(purchase.cost) || 0;
     }
   }
   const avgUnitCost = purchasedLbs > 0 ? purchaseCost / purchasedLbs : null;
 
-  // Poultry feed consumed during the period.
+  // Poultry feed consumed during the period (flock-restricted when asked).
   let consumedLbs = 0;
   for (const usage of consumption) {
-    if (usageFeedType(usage) === "poultry") {
+    if (usageFeedType(usage) === "poultry" && matchesFlock(usage, flock)) {
       consumedLbs += Number(usage.lbs) || 0;
     }
   }
@@ -385,7 +559,7 @@ async function poultryConsumptionBasis(months, storePricePerDozen) {
 // Sums `cost` over feed purchases in the given months whose feedType is
 // poultry. Queries each month's FEED#<yyyy-mm> partition (no Scan) and
 // classifies by feedType/type using the shared poultry rule.
-async function poultryFeedSpendForMonths(months) {
+async function poultryFeedSpendForMonths(months, { flock } = {}) {
   const batches = await Promise.all(
     months.map((month) =>
       queryAll({
@@ -401,11 +575,20 @@ async function poultryFeedSpendForMonths(months) {
 
   let spend = 0;
   for (const purchase of batches.flat()) {
-    if (isPoultryType(purchase.feedType ?? purchase.type)) {
+    if (isPoultryType(purchase.feedType ?? purchase.type) && matchesFlock(purchase, flock)) {
       spend += Number(purchase.cost) || 0;
     }
   }
   return spend;
+}
+
+// Whether a feed row belongs to the requested flock. With no flock filter
+// (the default), everything matches so legacy behavior is preserved. When a
+// flock is requested, only rows tagged with that exact `flock` value match;
+// untagged legacy rows do not contribute to a flock-scoped figure.
+function matchesFlock(row, flock) {
+  if (flock === undefined) return true;
+  return row.flock === flock;
 }
 
 // --- Feed inventory + forecasting --------------------------------------

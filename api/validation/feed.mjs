@@ -44,6 +44,17 @@ export function isPoultryType(value) {
   return POULTRY_TYPES.has(value.trim().toLowerCase());
 }
 
+// Normalizes an optional flock (coop id) tag. Returns the trimmed string, or
+// undefined when absent so legacy rows stay untagged. The flock keys per-flock
+// egg attribution; it matches the egg `coop` value.
+function normalizeFlock(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string" || value.trim().length === 0 || value.length > 128) {
+    throw new BadRequestError("flock must be a non-empty string (1-128 chars)");
+  }
+  return value.trim();
+}
+
 // Normalizes a purchasedAt/date value to an ISO timestamp. Empty -> now.
 function normalizePurchasedAt(value) {
   if (value === undefined || value === null || value === "") {
@@ -77,7 +88,7 @@ export function validateFeedPurchaseCreate(body) {
 // Stores bags, bagWeightLbs, totalLbs = bags * bagWeightLbs, plus the
 // normalized feed type, cost (default 0), and purchasedAt.
 function validateBagPurchase(body) {
-  const { bags, bagWeightLbs, feedType, cost, date, purchasedAt } = body;
+  const { bags, bagWeightLbs, feedType, cost, date, purchasedAt, flock } = body;
 
   if (typeof bags !== "number" || !Number.isInteger(bags) || bags < 1) {
     throw new BadRequestError("bags must be an integer >= 1");
@@ -106,6 +117,7 @@ function validateBagPurchase(body) {
     bagWeightLbs,
     totalLbs,
     cost: normalizedCost,
+    flock: normalizeFlock(flock),
     purchasedAt: normalizePurchasedAt(date ?? purchasedAt),
   };
 }
@@ -113,7 +125,7 @@ function validateBagPurchase(body) {
 // Legacy shape: { quantity, unit, type, cost, vendor, purchasedAt }. Kept
 // fully backward-compatible so existing clients keep working.
 function validateLegacyPurchase(body) {
-  const { type, quantity, unit, cost, vendor, purchasedAt, date } = body;
+  const { type, quantity, unit, cost, vendor, purchasedAt, date, flock } = body;
 
   const normalizedType = normalizeType(type);
 
@@ -139,6 +151,7 @@ function validateLegacyPurchase(body) {
     unit,
     cost,
     vendor: vendor.trim(),
+    flock: normalizeFlock(flock),
     purchasedAt: normalizePurchasedAt(purchasedAt ?? date),
   };
 }
@@ -229,6 +242,9 @@ export function formatFeedPurchase(row) {
   if (row.quantity !== undefined) out.quantity = row.quantity;
   if (row.unit !== undefined) out.unit = row.unit;
   if (row.vendor !== undefined) out.vendor = row.vendor;
+  // Per-flock attribution tag; included only when the row carries one so
+  // legacy/untagged purchases round-trip unchanged.
+  if (row.flock !== undefined) out.flock = row.flock;
 
   return out;
 }

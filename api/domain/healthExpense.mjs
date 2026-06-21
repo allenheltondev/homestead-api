@@ -8,58 +8,57 @@ import { NotFoundError } from "../services/errors.mjs";
 import { newId } from "../services/id.mjs";
 import { nowIso, yyyymm } from "../services/time.mjs";
 
-// Feed consumption (usage) data access. Single-table keys (see
-// docs/DATA_MODEL.md):
-//   pk = FEEDUSE#<yyyy-mm>     (month bucket derived from usedAt)
-//   sk = USE#<ts>#<id>         (ts = usedAt ISO; id = ULID)
+// Health expense data access. Single-table keys (see docs/DATA_MODEL.md):
+//   pk = HEALTHEXP#<yyyy-mm>   (month bucket derived from incurredAt)
+//   sk = EXP#<ts>#<id>         (ts = incurredAt ISO; id = ULID)
 //
-// Mirrors the feed-purchase / egg-collection domains. Every read here is a
+// Mirrors the feed-consumption / egg-collection domains. Every read here is a
 // GetItem or a Query on the base table -- there are NO Scans. Range listing
 // fans out one Query per month partition in the window; DELETE resolves the
 // row's key from an id-addressable pointer item.
 
-function useKey(month, ts, id) {
-  return { pk: `FEEDUSE#${month}`, sk: `USE#${ts}#${id}` };
+function expenseKey(month, ts, id) {
+  return { pk: `HEALTHEXP#${month}`, sk: `EXP#${ts}#${id}` };
 }
 
-// Id-addressable pointer key. Lets DELETE resolve a usage record's base-table
-// key (pk/sk) from the bare {id} path param without a Scan -- the same trick
-// feed purchases and egg collections use.
+// Id-addressable pointer key. Lets DELETE resolve an expense record's
+// base-table key (pk/sk) from the bare {id} path param without a Scan -- the
+// same trick feed consumption + egg collections use.
 function pointerKey(id) {
-  return { pk: `FEEDUSEID#${id}`, sk: "POINTER" };
+  return { pk: `HEALTHEXPID#${id}`, sk: "POINTER" };
 }
 
 // Builds the table row from validated fields. The month bucket derives from
-// usedAt, so the same timestamp drives the pk and the sk ts segment.
-export function buildFeedConsumptionItem(fields) {
+// incurredAt, so the same timestamp drives the pk and the sk ts segment.
+export function buildHealthExpenseItem(fields) {
   const id = newId();
-  const ts = fields.usedAt;
+  const ts = fields.incurredAt;
   const month = yyyymm(ts);
   const createdAt = nowIso();
 
   return {
-    ...useKey(month, ts, id),
-    entity: "FeedConsumption",
+    ...expenseKey(month, ts, id),
+    entity: "HealthExpense",
     id,
-    feedType: fields.feedType,
-    lbs: fields.lbs,
-    // Optional per-flock (coop) attribution tag; dropped by the marshaller
-    // when undefined so legacy usage rows stay untagged.
-    flock: fields.flock,
-    usedAt: ts,
+    category: fields.category,
+    cost: fields.cost,
+    // Optional fields are dropped by the marshaller when undefined.
+    animalRef: fields.animalRef,
+    note: fields.note,
+    incurredAt: ts,
     createdAt,
   };
 }
 
-export async function createFeedConsumption(fields) {
-  const item = buildFeedConsumptionItem(fields);
+export async function createHealthExpense(fields) {
+  const item = buildHealthExpenseItem(fields);
 
-  // Write the usage row plus an id-addressable pointer atomically. The pointer
-  // carries the real pk/sk so DELETE (which only gets {id}) can resolve the
-  // base-table key without a Scan.
+  // Write the expense row plus an id-addressable pointer atomically. The
+  // pointer carries the real pk/sk so DELETE (which only gets {id}) can
+  // resolve the base-table key without a Scan.
   const pointer = {
     ...pointerKey(item.id),
-    entity: "FeedConsumptionPointer",
+    entity: "HealthExpensePointer",
     id: item.id,
     targetPk: item.pk,
     targetSk: item.sk,
@@ -112,24 +111,24 @@ export function monthsInRange(fromTs, toTs) {
   return months;
 }
 
-// Query one month partition for USE# rows, optionally bounded by a ts range
-// on the sort key and filtered by feedType. The sort-key range uses the
-// `USE#<ts>` prefix so `between` works on the composite key.
-async function queryMonth(month, { fromTs, toTs, type }) {
-  const values = { ":pk": `FEEDUSE#${month}` };
+// Query one month partition for EXP# rows, optionally bounded by a ts range
+// on the sort key and filtered by category. The sort-key range uses the
+// `EXP#<ts>` prefix so `between` works on the composite key.
+async function queryMonth(month, { fromTs, toTs, category }) {
+  const values = { ":pk": `HEALTHEXP#${month}` };
   let keyCondition = "pk = :pk";
 
   if (fromTs || toTs) {
     // `~` sorts after `#` and any ts/id, so it caps the upper bound to the
-    // whole `USE#<toTs>...` group when only a ts (no id) is known.
-    const lower = `USE#${fromTs ?? ""}`;
-    const upper = `USE#${toTs ?? "￿"}~`;
+    // whole `EXP#<toTs>...` group when only a ts (no id) is known.
+    const lower = `EXP#${fromTs ?? ""}`;
+    const upper = `EXP#${toTs ?? "￿"}~`;
     keyCondition += " AND sk BETWEEN :lo AND :hi";
     values[":lo"] = lower;
     values[":hi"] = upper;
   } else {
     keyCondition += " AND begins_with(sk, :prefix)";
-    values[":prefix"] = "USE#";
+    values[":prefix"] = "EXP#";
   }
 
   const params = {
@@ -138,12 +137,12 @@ async function queryMonth(month, { fromTs, toTs, type }) {
     ExpressionAttributeValues: values,
   };
 
-  // Filter feedType within the month partitions (the base table has no
-  // by-type index for usage, so a type filter stays a partition-scoped
+  // Filter category within the month partitions (the base table has no
+  // by-category index, so a category filter stays a partition-scoped
   // FilterExpression, never a Scan).
-  if (type) {
-    params.FilterExpression = "feedType = :type";
-    values[":type"] = type;
+  if (category) {
+    params.FilterExpression = "category = :category";
+    values[":category"] = category;
   }
 
   return queryAll(params);
@@ -161,33 +160,33 @@ async function queryAll(params) {
   return items;
 }
 
-// Lists feed consumption records for the given filters, sorted
-// chronologically. A range fans out one Query per month partition; an
-// optional type is filtered within the partitions. No Scans in any branch.
-export async function listFeedConsumption({ fromTs, toTs, type } = {}) {
+// Lists health expenses for the given filters, sorted chronologically. A
+// range fans out one Query per month partition; an optional category is
+// filtered within the partitions. No Scans in any branch.
+export async function listHealthExpenses({ fromTs, toTs, category } = {}) {
   const months = monthsInRange(fromTs, toTs);
   const perMonth = await Promise.all(
-    months.map((m) => queryMonth(m, { fromTs, toTs, type })),
+    months.map((m) => queryMonth(m, { fromTs, toTs, category })),
   );
   const items = perMonth.flat();
-  items.sort((a, b) => a.usedAt.localeCompare(b.usedAt));
+  items.sort((a, b) => a.incurredAt.localeCompare(b.incurredAt));
   return items;
 }
 
-// Deletes a usage record by its bare {id}, scan-free. The base-table key is
-// pk=FEEDUSE#<yyyy-mm> / sk=USE#<ts>#<id>, so resolving a row needs the month
+// Deletes an expense record by its bare {id}, scan-free. The base-table key is
+// pk=HEALTHEXP#<yyyy-mm> / sk=EXP#<ts>#<id>, so resolving a row needs the month
 // partition AND the ts -- neither is recoverable from the id. create() writes
-// an id-addressable pointer (pk=FEEDUSEID#<id>) holding the real pk/sk;
+// an id-addressable pointer (pk=HEALTHEXPID#<id>) holding the real pk/sk;
 // DELETE does a GetItem on that pointer, deletes the row + pointer together,
 // and stays a pure key lookup.
-export async function deleteFeedConsumption(id) {
+export async function deleteHealthExpense(id) {
   const pointerResult = await ddb.send(new GetCommand({
     TableName: TABLE_NAME,
     Key: pointerKey(id),
   }));
   const pointer = pointerResult.Item;
   if (!pointer) {
-    throw new NotFoundError("feed consumption", id);
+    throw new NotFoundError("health expense", id);
   }
 
   await ddb.send(new TransactWriteCommand({
