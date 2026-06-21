@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Browsers respect the media query and swap the favicon when the
+         OS theme flips. Light scheme uses the dark-inked logo (legible
+         on white tabs); dark scheme uses the white-inked logo. -->
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="/homestead-logo-light.svg"
+      media="(prefers-color-scheme: light)"
+    />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="/homestead-logo-dark.svg"
+      media="(prefers-color-scheme: dark)"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Homestead</title>
+    <script>
+      // Apply theme before React mounts so users with dark mode don't
+      // see a white flash. Mirrors the lookup in ThemeContext.tsx.
+      (function () {
+        try {
+          var stored = localStorage.getItem('homestead-theme');
+          var theme = stored === 'light' || stored === 'dark'
+            ? stored
+            : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          if (theme === 'dark') document.documentElement.classList.add('dark');
+          document.documentElement.style.colorScheme = theme;
+        } catch (_) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
