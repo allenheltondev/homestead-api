@@ -303,3 +303,84 @@ Three insight features extend the read/write surface:
 existing optional `period` with the new optional `flock`, and `api.getEggCost`
 forwards `flock` as a query-string filter on `GET /stats/egg-cost`. All prior
 egg-cost utterances keep working unchanged.
+
+## AI-agent fallback (Amazon Nova Pro on Bedrock)
+
+When a phrase doesn't match any structured intent, the skill no longer says "I
+didn't catch that." Instead it hands the utterance to an **Amazon Nova Pro**
+model on **Amazon Bedrock** (via the **Converse API**), which has the homestead
+API operations available as tools and can act on free-form requests.
+
+### Catch-all SearchQuery intent
+
+`CatchAllIntent` (`alexa/skill-package/interactionModels/custom/en-US.json`) has
+a single `query` slot of type `AMAZON.SearchQuery` with a `"{query}"` sample, so
+any phrase the structured intents don't claim lands here. `CatchAllIntentHandler`
+reads the `query` slot and calls `runAgent`. `AMAZON.FallbackIntent` also routes
+into `runAgent` (using the raw input when the client provides it, else a generic
+help prompt). The structured intents remain the primary path — the agent is only
+the fallback. A SearchQuery catch-all is acceptable here because this is a
+personal skill.
+
+### The Converse tool loop (`alexa/lib/agent.mjs`)
+
+`runAgent({ handlerInput, utterance })`:
+
+1. Builds a `BedrockRuntimeClient` (region defaults to the Lambda's) and the
+   tool list from `alexa/lib/tools.mjs`. The system prompt frames it as a
+   homestead voice assistant that must keep answers short and speakable, must
+   use tools rather than invent data, and must *propose* (not perform) changes.
+2. Loops up to **3 iterations**, calling `ConverseCommand` with
+   `{ modelId, system, messages, toolConfig: { tools }, inferenceConfig: {
+   maxTokens: 512, temperature: 0 } }`.
+3. On `stopReason === "tool_use"`, for each requested `{ toolUse }` block:
+   - **READ** tools (`get_summary`, `get_herd`, `get_egg_stats`,
+     `get_egg_cost`, `get_feed_inventory`, `get_health_stats`, `get_mortality`,
+     `get_digest`) run inline against `lib/api.mjs`; the JSON result is appended
+     as a `toolResult` user message and Converse is called again.
+   - **WRITE** tools (`log_feed_purchase`, `log_feed_usage`,
+     `log_egg_collection`, `record_birth`, `record_death`, `move_animals`,
+     `record_health_expense`) are **not** executed in the loop. The first
+     requested write is captured as a `pendingAction` and the loop breaks.
+4. Otherwise (`end_turn`) the assistant's text is spoken; if the model produced
+   nothing usable, a graceful "I couldn't find that" is spoken instead.
+
+`runAgent` never throws to the user: Bedrock/API failures map to a spoken
+apology, and `MissingToken`/401/403 map to the existing account-linking prompt.
+
+### Write confirmation (confirm-gated)
+
+When the agent proposes a write it stores the `pendingAction`
+(`{ name, args, phrase }`) in Alexa **session attributes** and speaks
+`"<phrase>. Should I do that?"` with a reprompt, keeping the session open.
+
+- `AMAZON.YesIntent` → `ConfirmActionYesIntentHandler` reads `pendingAction`,
+  executes the matching `lib/api.mjs` write via the tool registry, speaks a
+  confirmation, and clears it.
+- `AMAZON.NoIntent` → `ConfirmActionNoIntentHandler` discards the pending action
+  and acknowledges.
+- With nothing pending, both fall through to the help prompt.
+
+The Yes/No handlers are registered **before** the catch-all in the `handlers`
+array so a bare "yes"/"no" confirms the pending write rather than being swept
+into the agent. The existing dialog-managed write intents (`LogFeedPurchase`,
+`RecordBirth`, etc.) are unchanged and remain the primary write path.
+
+### IAM, parameter, and model access
+
+- `template.yaml` grants `AlexaSkillFunction` `bedrock:InvokeModel` and
+  `bedrock:InvokeModelWithResponseStream`, scoped to the Nova Pro foundation
+  model (`arn:${AWS::Partition}:bedrock:*::foundation-model/amazon.nova-pro-v1:0`)
+  and the cross-region inference-profile ARN.
+- A `BEDROCK_MODEL_ID` environment variable is set from the new `BedrockModelId`
+  parameter (default `us.amazon.nova-pro-v1:0`, the US cross-region inference
+  profile). Override it to pin a different region/profile or model.
+- `@aws-sdk/client-bedrock-runtime` is added to `alexa/package.json`.
+
+**Operator step — enable Nova Pro:** In the Amazon Bedrock console for the
+deploy region, open **Model access** and request/enable access to **Amazon Nova
+Pro** before the first deploy (model access is off by default). Confirm that the
+region carries the inference profile the `BedrockModelId` resolves through
+(e.g. `us.amazon.nova-pro-v1:0` requires a US region such as `us-east-1`); if
+your Lambda runs elsewhere, set `BedrockModelId` to the matching `eu.*` /
+`apac.*` profile (or a region-local model id) and enable access there.

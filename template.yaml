@@ -65,6 +65,14 @@ Parameters:
       Optional email subscribed to the CloudWatch alarm SNS topic (API 5xx
       rate, authorizer failures, throttling). Leave empty to create the
       alarms and topic without a notification subscription.
+  BedrockModelId:
+    Type: String
+    Default: "us.amazon.nova-pro-v1:0"
+    Description: |
+      Amazon Bedrock model id (or cross-region inference profile id) the Alexa
+      skill's AI-agent fallback invokes via the Converse API. Defaults to the
+      US Amazon Nova Pro inference profile. Nova Pro model access must be
+      enabled in the Bedrock console for the deploy region (see docs/ALEXA.md).
   AlexaUserPoolClientId:
     Type: String
     Default: ""
@@ -403,6 +411,9 @@ Resources:
             - DeployCustomDomain
             - !Sub "https://api.homestead.${BaseCustomDomain}"
             - !Sub "https://${HomesteadApi}.execute-api.${AWS::Region}.amazonaws.com/v1"
+          # Bedrock model id (or inference profile) the AI-agent fallback uses
+          # when no structured intent matches the user's phrase.
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
       Events:
         AlexaTrigger:
           Type: AlexaSkill
@@ -410,6 +421,17 @@ Resources:
             SkillId: !If [HasAlexaSkillId, !Ref AlexaSkillId, !Ref "AWS::NoValue"]
       Policies:
         - AWSLambdaBasicExecutionRole
+        # The AI-agent fallback invokes Amazon Nova Pro via the Bedrock Converse
+        # API. Scoped to the Nova Pro foundation model plus the cross-region
+        # inference profile (us.* / eu.* / apac.*) the model id resolves through.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/amazon.nova-pro-v1:0"
+                - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*amazon.nova-pro-v1:0"
 
   # --- Observability / hardening ----------------------------------------
   # SNS topic alarms publish to. An email subscription is added only when

@@ -56,6 +56,16 @@ jest.unstable_mockModule("../lib/api.mjs", () => ({
   tokenFromRequest: () => "tok",
 }));
 
+// The agent-fallback handlers (CatchAll / Fallback) delegate to runAgent, which
+// in turn talks to Bedrock. Mock it here so this suite stays focused on the
+// structured intents and never reaches the network. The dedicated
+// agent.test.mjs / fallback-handlers.test.mjs suites cover the real loop.
+const runAgent = jest.fn(() => ({ speech: "agent" }));
+jest.unstable_mockModule("../lib/agent.mjs", () => ({
+  runAgent,
+  PENDING_ACTION_KEY: "pendingAction",
+}));
+
 const {
   LaunchRequestHandler,
   GetHerdSummaryIntentHandler,
@@ -202,11 +212,13 @@ describe("LaunchRequest / Help / Fallback", () => {
     );
     expect(res.speech).toMatch(/herd summary/);
   });
-  test("fallback apologizes", () => {
-    const res = FallbackIntentHandler.handle(
-      handlerInput(intentRequest("AMAZON.FallbackIntent")),
-    );
-    expect(res.speech).toMatch(/didn't catch that/);
+  test("fallback routes into the AI agent", () => {
+    const hi = handlerInput(intentRequest("AMAZON.FallbackIntent"));
+    FallbackIntentHandler.handle(hi);
+    expect(runAgent).toHaveBeenCalledWith({
+      handlerInput: hi,
+      utterance: undefined,
+    });
   });
   test("cancel/stop says goodbye", () => {
     const res = CancelAndStopIntentHandler.handle(

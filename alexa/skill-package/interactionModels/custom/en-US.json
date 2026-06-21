@@ -109,6 +109,8 @@
         { "name": "AMAZON.StopIntent", "samples": [] },
         { "name": "AMAZON.NavigateHomeIntent", "samples": [] },
         { "name": "AMAZON.FallbackIntent", "samples": [] },
+        { "name": "AMAZON.YesIntent", "samples": [] },
+        { "name": "AMAZON.NoIntent", "samples": [] },
         {
           "name": "GetHerdSummaryIntent",
           "samples": [
@@ -339,6 +341,15 @@
             "what's my homestead digest",
             "for my weekly summary",
             "homestead digest"
+          ]
+        },
+        {
+          "name": "CatchAllIntent",
+          "slots": [
+            { "name": "query", "type": "AMAZON.SearchQuery" }
+          ],
+          "samples": [
+            "{query}"
           ]
         }
       ]
