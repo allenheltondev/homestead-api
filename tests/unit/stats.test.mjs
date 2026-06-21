@@ -22,6 +22,10 @@ const {
   birthStats,
   deathStats,
   feedStats,
+  eggStats,
+  eggStatsForPeriod,
+  eggCostStats,
+  resolveStorePricePerDozen,
   summaryStats,
   monthsForPeriod,
 } = await import("../../api/domain/stats.mjs");
@@ -192,6 +196,131 @@ describe("feedStats", () => {
   });
 });
 
+describe("eggStats", () => {
+  test("sums counts, counts distinct days, and averages per day", async () => {
+    route((input) => {
+      const pk = input.ExpressionAttributeValues[":pk"];
+      expect(input.ExpressionAttributeValues[":sk"]).toBe("COLLECT#");
+      if (pk === "EGG#2026-06") {
+        return {
+          Items: [
+            { count: 12, collectedAt: "2026-06-01T00:00:00.000Z" },
+            { count: 10, collectedAt: "2026-06-01T08:00:00.000Z" },
+            { count: 14, collectedAt: "2026-06-02T00:00:00.000Z" },
+          ],
+        };
+      }
+      return { Items: [] };
+    });
+
+    const result = await eggStats(["2026-06"]);
+    expect(result.totalEggs).toBe(36);
+    expect(result.dozens).toBe(3);
+    expect(result.days).toBe(2); // June 1 and June 2
+    expect(result.perDay).toBe(18);
+  });
+
+  test("zero collections yields zeros (no divide-by-zero)", async () => {
+    route(() => ({ Items: [] }));
+    const result = await eggStatsForPeriod("2026-06", ["2026-06"]);
+    expect(result).toEqual({
+      period: "2026-06",
+      totalEggs: 0,
+      dozens: 0,
+      days: 0,
+      perDay: 0,
+    });
+  });
+});
+
+describe("resolveStorePricePerDozen", () => {
+  afterEach(() => {
+    delete process.env.STORE_EGG_PRICE_PER_DOZEN;
+  });
+
+  test("override wins", () => {
+    process.env.STORE_EGG_PRICE_PER_DOZEN = "5";
+    expect(resolveStorePricePerDozen(6)).toBe(6);
+  });
+
+  test("falls back to env then to 4.0", () => {
+    process.env.STORE_EGG_PRICE_PER_DOZEN = "5.5";
+    expect(resolveStorePricePerDozen()).toBe(5.5);
+    delete process.env.STORE_EGG_PRICE_PER_DOZEN;
+    expect(resolveStorePricePerDozen()).toBe(4.0);
+  });
+});
+
+describe("eggCostStats", () => {
+  afterEach(() => {
+    delete process.env.STORE_EGG_PRICE_PER_DOZEN;
+  });
+
+  function routeEggsAndPoultry({ eggs, poultryCost }) {
+    route((input) => {
+      const pk = input.ExpressionAttributeValues[":pk"];
+      if (pk === "EGG#2026-06") return { Items: eggs };
+      if (pk === "FEED#2026-06") return { Items: poultryCost };
+      return { Items: [] };
+    });
+  }
+
+  test("computes cost per dozen / egg and store comparison on a poultry basis", async () => {
+    routeEggsAndPoultry({
+      eggs: [{ count: 24, collectedAt: "2026-06-01T00:00:00.000Z" }],
+      poultryCost: [
+        { feedType: "poultry", cost: 30 },
+        { type: "layer", cost: 10 }, // legacy type alias still classified poultry
+        { type: "hay", cost: 100 }, // not poultry -- excluded
+      ],
+    });
+
+    const result = await eggCostStats("2026-06", ["2026-06"], { storePricePerDozen: 4 });
+    expect(result.eggs).toBe(24);
+    expect(result.dozens).toBe(2);
+    expect(result.poultryFeedSpend).toBe(40);
+    expect(result.costPerDozen).toBe(20);
+    expect(result.costPerEgg).toBeCloseTo(40 / 24);
+    expect(result.storePricePerDozen).toBe(4);
+    expect(result.savingsPerDozen).toBe(4 - 20);
+    expect(result.cheaperThanStore).toBe(false);
+  });
+
+  test("cheaperThanStore true when cost beats the store price", async () => {
+    routeEggsAndPoultry({
+      eggs: [{ count: 120, collectedAt: "2026-06-01T00:00:00.000Z" }],
+      poultryCost: [{ feedType: "chicken", cost: 10 }],
+    });
+    const result = await eggCostStats("2026-06", ["2026-06"], { storePricePerDozen: 4 });
+    expect(result.dozens).toBe(10);
+    expect(result.costPerDozen).toBe(1);
+    expect(result.cheaperThanStore).toBe(true);
+  });
+
+  test("null cost figures when there are no dozens", async () => {
+    routeEggsAndPoultry({ eggs: [], poultryCost: [{ feedType: "poultry", cost: 50 }] });
+    const result = await eggCostStats("2026-06", ["2026-06"], { storePricePerDozen: 4 });
+    expect(result.dozens).toBe(0);
+    expect(result.costPerDozen).toBeNull();
+    expect(result.costPerEgg).toBeNull();
+    expect(result.savingsPerDozen).toBeNull();
+    expect(result.cheaperThanStore).toBeNull();
+    expect(result.poultryFeedSpend).toBe(50);
+  });
+
+  test("defaults the store price from the env var", async () => {
+    process.env.STORE_EGG_PRICE_PER_DOZEN = "6";
+    routeEggsAndPoultry({
+      eggs: [{ count: 12, collectedAt: "2026-06-01T00:00:00.000Z" }],
+      poultryCost: [{ feedType: "poultry", cost: 3 }],
+    });
+    const result = await eggCostStats("2026-06", ["2026-06"]);
+    expect(result.storePricePerDozen).toBe(6);
+    expect(result.costPerDozen).toBe(3);
+    expect(result.cheaperThanStore).toBe(true);
+  });
+});
+
 describe("summaryStats", () => {
   test("composes herd, births/deaths this month + year, feed spend, and occupancy", async () => {
     const now = new Date("2026-06-21T00:00:00Z");
@@ -224,9 +353,18 @@ describe("summaryStats", () => {
       // Deaths.
       if (pk === "EVENT#DEATH#2026-06") return { Count: 1 };
       if (pk?.startsWith("EVENT#DEATH#")) return { Count: 0 };
-      // Feed this month.
+      // Feed this month: hay (non-poultry) + poultry for the egg-cost basis.
       if (pk === "FEED#2026-06") {
-        return { Items: [{ type: "hay", cost: 75, quantity: 4 }] };
+        return {
+          Items: [
+            { type: "hay", cost: 75, quantity: 4 },
+            { feedType: "poultry", cost: 24, quantity: 2 },
+          ],
+        };
+      }
+      // Eggs this month: 24 eggs collected on June 21 (within the trailing week).
+      if (pk === "EGG#2026-06") {
+        return { Items: [{ count: 24, collectedAt: "2026-06-21T00:00:00.000Z" }] };
       }
       return {};
     });
@@ -245,7 +383,11 @@ describe("summaryStats", () => {
     // June counts 3; the full year = June (3) + 11 other months (1 each) = 14.
     expect(summary.births).toEqual({ thisMonth: 3, thisYear: 14 });
     expect(summary.deaths).toEqual({ thisMonth: 1, thisYear: 1 });
-    expect(summary.feed).toEqual({ thisMonthSpend: 75, thisMonthQuantity: 4 });
+    expect(summary.feed).toEqual({ thisMonthSpend: 99, thisMonthQuantity: 6 });
+    // 24 eggs this month, all within the trailing week (June 15-21).
+    expect(summary.eggs).toEqual({ thisWeek: 24, thisMonth: 24 });
+    // 24 eggs = 2 dozen; poultry feed spend 24 -> $12/dozen, above the $4 default.
+    expect(summary.eggCost).toEqual({ costPerDozenThisMonth: 12, cheaperThanStore: false });
     expect(summary.pastures).toEqual({
       total: 2,
       occupancy: [{ name: "North Field", count: 2 }],

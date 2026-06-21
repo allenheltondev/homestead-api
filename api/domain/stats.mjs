@@ -1,6 +1,21 @@
 import { QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { TABLE_NAME, ddb } from "../services/ddb.mjs";
 import { yyyymm } from "../services/time.mjs";
+import { isPoultryType } from "../validation/feed.mjs";
+
+// Default store price per dozen when neither the query param nor the
+// STORE_EGG_PRICE_PER_DOZEN env var supplies one.
+const DEFAULT_STORE_PRICE_PER_DOZEN = 4.0;
+
+// Resolves the store price per dozen: explicit override wins, else the
+// STORE_EGG_PRICE_PER_DOZEN env var (parsed as a float), else 4.0.
+export function resolveStorePricePerDozen(override) {
+  if (override !== undefined && override !== null) {
+    return override;
+  }
+  const fromEnv = parseFloat(process.env.STORE_EGG_PRICE_PER_DOZEN);
+  return Number.isFinite(fromEnv) ? fromEnv : DEFAULT_STORE_PRICE_PER_DOZEN;
+}
 
 // Read-only aggregation for the stats & reporting endpoints. Every read
 // here is a Query against a known partition (base table, GSI1, or GSI2) --
@@ -200,6 +215,117 @@ export async function feedStats(months) {
   return { months, totalCost, totalQuantity, purchaseCount, byType };
 }
 
+// --- Eggs by period -----------------------------------------------------
+// Egg collections partition by month on the base table (pk = EGG#<yyyy-mm>).
+// We Query each month in the period and sum the counts. `days` is the count
+// of distinct collection days; `perDay` is the average eggs per collection
+// day (0 when there were none). No Scans.
+export async function eggStats(months) {
+  const batches = await Promise.all(
+    months.map((month) =>
+      queryAll({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": `EGG#${month}`,
+          ":sk": "COLLECT#",
+        },
+      }),
+    ),
+  );
+
+  let totalEggs = 0;
+  const collectionDays = new Set();
+
+  for (const collection of batches.flat()) {
+    totalEggs += Number(collection.count) || 0;
+    const collectedAt = collection.collectedAt;
+    if (typeof collectedAt === "string") {
+      collectionDays.add(collectedAt.slice(0, 10));
+    }
+  }
+
+  const days = collectionDays.size;
+  const dozens = totalEggs / 12;
+  const perDay = days > 0 ? totalEggs / days : 0;
+
+  return { totalEggs, dozens, days, perDay };
+}
+
+// Builds the GET /stats/eggs payload for a period.
+export async function eggStatsForPeriod(period, months) {
+  const { totalEggs, dozens, days, perDay } = await eggStats(months);
+  return { period, totalEggs, dozens, days, perDay };
+}
+
+// --- Egg cost per dozen -------------------------------------------------
+// Composes egg counts (eggStats) with poultry feed spend over the same
+// period. poultryFeedSpend sums `cost` over feed purchases whose feedType is
+// poultry (chicken/layer/poultry). costPerDozen / costPerEgg derive from
+// that spend; when there are no dozens the cost figures are null so callers
+// don't divide by zero. Comparison against the store price yields the
+// savings + cheaperThanStore flags.
+export async function eggCostStats(period, months, { storePricePerDozen } = {}) {
+  const [{ totalEggs, dozens }, poultryFeedSpend] = await Promise.all([
+    eggStats(months),
+    poultryFeedSpendForMonths(months),
+  ]);
+
+  const storePrice = resolveStorePricePerDozen(storePricePerDozen);
+
+  let costPerDozen = null;
+  let costPerEgg = null;
+  let savingsPerDozen = null;
+  let cheaperThanStore = null;
+
+  if (dozens > 0) {
+    costPerDozen = poultryFeedSpend / dozens;
+    savingsPerDozen = storePrice - costPerDozen;
+    cheaperThanStore = costPerDozen < storePrice;
+  }
+  if (totalEggs > 0) {
+    costPerEgg = poultryFeedSpend / totalEggs;
+  }
+
+  return {
+    period,
+    eggs: totalEggs,
+    dozens,
+    poultryFeedSpend,
+    costPerDozen,
+    costPerEgg,
+    storePricePerDozen: storePrice,
+    savingsPerDozen,
+    cheaperThanStore,
+  };
+}
+
+// Sums `cost` over feed purchases in the given months whose feedType is
+// poultry. Queries each month's FEED#<yyyy-mm> partition (no Scan) and
+// classifies by feedType/type using the shared poultry rule.
+async function poultryFeedSpendForMonths(months) {
+  const batches = await Promise.all(
+    months.map((month) =>
+      queryAll({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": `FEED#${month}`,
+          ":sk": "PURCHASE#",
+        },
+      }),
+    ),
+  );
+
+  let spend = 0;
+  for (const purchase of batches.flat()) {
+    if (isPoultryType(purchase.feedType ?? purchase.type)) {
+      spend += Number(purchase.cost) || 0;
+    }
+  }
+  return spend;
+}
+
 // --- Summary ------------------------------------------------------------
 // One speakable payload composing the above: herd by species, births &
 // deaths this month + this year, feed spend this month, and pasture
@@ -209,16 +335,29 @@ export async function summaryStats(now = new Date()) {
   const year = String(new Date(now).getUTCFullYear());
   const yearMonths = monthsForPeriod(year);
 
-  const [herd, occupancy, birthsMonth, birthsYear, deathsMonth, deathsYear, feedMonth] =
-    await Promise.all([
-      herdStats(),
-      pastureOccupancy(),
-      birthStats([month]),
-      birthStats(yearMonths),
-      deathStats([month]),
-      deathStats(yearMonths),
-      feedStats([month]),
-    ]);
+  const [
+    herd,
+    occupancy,
+    birthsMonth,
+    birthsYear,
+    deathsMonth,
+    deathsYear,
+    feedMonth,
+    eggsMonth,
+    eggsWeek,
+    eggCostMonth,
+  ] = await Promise.all([
+    herdStats(),
+    pastureOccupancy(),
+    birthStats([month]),
+    birthStats(yearMonths),
+    deathStats([month]),
+    deathStats(yearMonths),
+    feedStats([month]),
+    eggStats([month]),
+    eggsThisWeek(now),
+    eggCostStats(month, [month]),
+  ]);
 
   const herdBySpecies = Object.entries(herd.bySpecies).map(([species, s]) => ({
     species,
@@ -239,9 +378,55 @@ export async function summaryStats(now = new Date()) {
       thisMonthSpend: feedMonth.totalCost,
       thisMonthQuantity: feedMonth.totalQuantity,
     },
+    eggs: {
+      thisWeek: eggsWeek,
+      thisMonth: eggsMonth.totalEggs,
+    },
+    eggCost: {
+      costPerDozenThisMonth: eggCostMonth.costPerDozen,
+      cheaperThanStore: eggCostMonth.cheaperThanStore,
+    },
     pastures: {
       total: occupancy.total,
       occupancy: occupancy.pastures.map((p) => ({ name: p.name, count: p.count })),
     },
   };
+}
+
+// Sums eggs collected in the trailing 7 days ending at `now` (inclusive).
+// Queries each month partition the window touches (one or two) and filters
+// rows by collectedAt -- no Scan.
+async function eggsThisWeek(now = new Date()) {
+  const end = new Date(now);
+  const start = new Date(end.getTime() - 6 * 24 * 60 * 60 * 1000);
+  const startMonth = yyyymm(start);
+  const endMonth = yyyymm(end);
+  const months = startMonth === endMonth ? [startMonth] : [startMonth, endMonth];
+
+  const startIso = new Date(
+    Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate(), 0, 0, 0, 0),
+  ).toISOString();
+  const endIso = end.toISOString();
+
+  const batches = await Promise.all(
+    months.map((month) =>
+      queryAll({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": `EGG#${month}`,
+          ":sk": "COLLECT#",
+        },
+      }),
+    ),
+  );
+
+  let total = 0;
+  for (const collection of batches.flat()) {
+    const collectedAt = collection.collectedAt;
+    if (typeof collectedAt === "string" && collectedAt >= startIso && collectedAt <= endIso) {
+      total += Number(collection.count) || 0;
+    }
+  }
+  return total;
 }

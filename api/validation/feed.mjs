@@ -5,8 +5,17 @@ import { BadRequestError } from "../services/errors.mjs";
 // out. Types are free-form strings (e.g. "hay", "grain") but normalized to
 // lower case so the GSI1 `FEED#<type>` partition is stable regardless of
 // how the client cased the input.
+//
+// Two payload shapes are accepted, distinguished by presence of `bags`:
+//   - bag shape:    { bags, bagWeightLbs, feedType, cost?, date? }
+//   - legacy shape: { quantity, unit, type, cost, vendor, purchasedAt? }
+// The bag shape additionally derives totalLbs = bags * bagWeightLbs. Both
+// store a normalized `type`/`feedType`, `cost`, and `purchasedAt`.
 
 const UNITS = new Set(["lb", "kg", "ton", "bag", "bale", "flake"]);
+
+// Feed types that count as poultry for cost-per-dozen analytics.
+const POULTRY_TYPES = new Set(["chicken", "layer", "poultry"]);
 
 // ISO date-time, ISO date (YYYY-MM-DD), or month bucket (YYYY-MM). Used by
 // the create body (purchasedAt) and the list query bounds (from / to).
@@ -22,18 +31,89 @@ function normalizeType(value) {
   if (trimmed.length === 0 || trimmed.length > 64) {
     throw new BadRequestError("type is required (1-64 chars)");
   }
+  // Collapse the chicken/layer/poultry aliases onto a single "poultry" type
+  // so the analytics layer can sum poultry feed spend by a stable type.
+  if (POULTRY_TYPES.has(trimmed)) return "poultry";
   return trimmed;
 }
 
-// Validates the POST /feed-purchases body. Returns a clean fields object
-// the domain layer turns into a row; purchasedAt is normalized to an ISO
+// Whether a (normalized or raw) feed type is poultry. Exported so the stats
+// layer shares the exact same classification.
+export function isPoultryType(value) {
+  if (typeof value !== "string") return false;
+  return POULTRY_TYPES.has(value.trim().toLowerCase());
+}
+
+// Normalizes a purchasedAt/date value to an ISO timestamp. Empty -> now.
+function normalizePurchasedAt(value) {
+  if (value === undefined || value === null || value === "") {
+    return new Date().toISOString();
+  }
+  if (typeof value !== "string" || isNaN(Date.parse(value))) {
+    throw new BadRequestError("purchasedAt must be an ISO date or date-time string");
+  }
+  if (ISO_DATE_RE.test(value)) {
+    return new Date(`${value}T00:00:00.000Z`).toISOString();
+  }
+  return new Date(value).toISOString();
+}
+
+// Validates the POST /feed-purchases body. Returns a clean fields object the
+// domain layer turns into a row. Dispatches on `bags`: the new bag shape vs.
+// the legacy quantity/unit shape. purchasedAt is normalized to an ISO
 // timestamp so the sort key and gsi1sk order chronologically.
 export function validateFeedPurchaseCreate(body) {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     throw new BadRequestError("request body must be a JSON object");
   }
 
-  const { type, quantity, unit, cost, vendor, purchasedAt } = body;
+  if (body.bags !== undefined) {
+    return validateBagPurchase(body);
+  }
+  return validateLegacyPurchase(body);
+}
+
+// New bag-based shape: { bags, bagWeightLbs, feedType, cost?, date? }.
+// Stores bags, bagWeightLbs, totalLbs = bags * bagWeightLbs, plus the
+// normalized feed type, cost (default 0), and purchasedAt.
+function validateBagPurchase(body) {
+  const { bags, bagWeightLbs, feedType, cost, date, purchasedAt } = body;
+
+  if (typeof bags !== "number" || !Number.isInteger(bags) || bags < 1) {
+    throw new BadRequestError("bags must be an integer >= 1");
+  }
+
+  if (typeof bagWeightLbs !== "number" || !Number.isFinite(bagWeightLbs) || bagWeightLbs <= 0) {
+    throw new BadRequestError("bagWeightLbs must be a positive number");
+  }
+
+  const normalizedType = normalizeType(feedType);
+
+  let normalizedCost = 0;
+  if (cost !== undefined && cost !== null) {
+    if (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0) {
+      throw new BadRequestError("cost must be a non-negative number");
+    }
+    normalizedCost = cost;
+  }
+
+  const totalLbs = bags * bagWeightLbs;
+
+  return {
+    type: normalizedType,
+    feedType: normalizedType,
+    bags,
+    bagWeightLbs,
+    totalLbs,
+    cost: normalizedCost,
+    purchasedAt: normalizePurchasedAt(date ?? purchasedAt),
+  };
+}
+
+// Legacy shape: { quantity, unit, type, cost, vendor, purchasedAt }. Kept
+// fully backward-compatible so existing clients keep working.
+function validateLegacyPurchase(body) {
+  const { type, quantity, unit, cost, vendor, purchasedAt, date } = body;
 
   const normalizedType = normalizeType(type);
 
@@ -53,23 +133,13 @@ export function validateFeedPurchaseCreate(body) {
     throw new BadRequestError("vendor is required (1-128 chars)");
   }
 
-  let purchasedAtIso;
-  if (purchasedAt === undefined || purchasedAt === null || purchasedAt === "") {
-    purchasedAtIso = new Date().toISOString();
-  } else {
-    if (typeof purchasedAt !== "string" || isNaN(Date.parse(purchasedAt))) {
-      throw new BadRequestError("purchasedAt must be an ISO date or date-time string");
-    }
-    purchasedAtIso = new Date(purchasedAt).toISOString();
-  }
-
   return {
     type: normalizedType,
     quantity,
     unit,
     cost,
     vendor: vendor.trim(),
-    purchasedAt: purchasedAtIso,
+    purchasedAt: normalizePurchasedAt(purchasedAt ?? date),
   };
 }
 
@@ -138,16 +208,27 @@ function parseBound(value, label, inclusiveEnd) {
 }
 
 // Maps a stored row to the API response shape. Internal key attributes
-// (pk/sk/gsi1*) never leak to clients.
+// (pk/sk/gsi1*) never leak to clients. Bag fields are included only when the
+// row was created via the bag shape so legacy rows round-trip unchanged.
 export function formatFeedPurchase(row) {
-  return {
+  const out = {
     id: row.id,
     type: row.type,
-    quantity: row.quantity,
-    unit: row.unit,
     cost: row.cost,
-    vendor: row.vendor,
     purchasedAt: row.purchasedAt,
     createdAt: row.createdAt,
   };
+
+  if (row.bags !== undefined) {
+    out.feedType = row.feedType ?? row.type;
+    out.bags = row.bags;
+    out.bagWeightLbs = row.bagWeightLbs;
+    out.totalLbs = row.totalLbs;
+  }
+
+  if (row.quantity !== undefined) out.quantity = row.quantity;
+  if (row.unit !== undefined) out.unit = row.unit;
+  if (row.vendor !== undefined) out.vendor = row.vendor;
+
+  return out;
 }

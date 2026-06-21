@@ -28,6 +28,11 @@ const {
   deleteFeedPurchase,
   monthsInRange,
 } = await import("../../api/domain/feed.mjs");
+const {
+  validateFeedPurchaseCreate,
+  formatFeedPurchase,
+  isPoultryType,
+} = await import("../../api/validation/feed.mjs");
 const { registerFeedRoutes } = await import("../../api/routes/feed.mjs");
 
 beforeEach(() => {
@@ -111,6 +116,88 @@ describe("createFeedPurchase", () => {
     expect(detail.type).toBe("grain"); // normalized lower-case
     expect(detail.vendor).toBe("Co-op");
     expect(JSON.parse(res.body).type).toBe("grain");
+  });
+});
+
+describe("feed-by-the-bag validation", () => {
+  test("accepts the bag shape and derives totalLbs", () => {
+    const fields = validateFeedPurchaseCreate({
+      bags: 4,
+      bagWeightLbs: 50,
+      feedType: "Layer",
+      cost: 80,
+      date: "2026-06-10",
+    });
+    expect(fields.bags).toBe(4);
+    expect(fields.bagWeightLbs).toBe(50);
+    expect(fields.totalLbs).toBe(200);
+    // chicken/layer/poultry collapse to poultry.
+    expect(fields.type).toBe("poultry");
+    expect(fields.feedType).toBe("poultry");
+    expect(fields.cost).toBe(80);
+    expect(fields.purchasedAt).toBe("2026-06-10T00:00:00.000Z");
+  });
+
+  test("cost defaults to 0 when omitted on a bag purchase", () => {
+    const fields = validateFeedPurchaseCreate({
+      bags: 1,
+      bagWeightLbs: 40,
+      feedType: "chicken",
+    });
+    expect(fields.cost).toBe(0);
+    expect(fields.type).toBe("poultry");
+  });
+
+  test("rejects bad bag fields", () => {
+    expect(() => validateFeedPurchaseCreate({ bags: 0, bagWeightLbs: 50, feedType: "layer" }))
+      .toThrow(/bags/i);
+    expect(() => validateFeedPurchaseCreate({ bags: 2, bagWeightLbs: 0, feedType: "layer" }))
+      .toThrow(/bagWeightLbs/i);
+  });
+
+  test("legacy quantity/unit shape still works", () => {
+    const fields = validateFeedPurchaseCreate({
+      type: "hay",
+      quantity: 10,
+      unit: "bale",
+      cost: 120,
+      vendor: "Acme",
+    });
+    expect(fields.quantity).toBe(10);
+    expect(fields.unit).toBe("bale");
+    expect(fields.bags).toBeUndefined();
+    expect(fields.type).toBe("hay");
+  });
+
+  test("isPoultryType classifies chicken/layer/poultry", () => {
+    expect(isPoultryType("chicken")).toBe(true);
+    expect(isPoultryType("Layer")).toBe(true);
+    expect(isPoultryType("poultry")).toBe(true);
+    expect(isPoultryType("hay")).toBe(false);
+  });
+
+  test("createFeedPurchase stores the bag fields and formatFeedPurchase emits them", async () => {
+    send.mockResolvedValueOnce({});
+    const fields = validateFeedPurchaseCreate({
+      bags: 3,
+      bagWeightLbs: 50,
+      feedType: "layer",
+      cost: 60,
+      date: "2026-06-01",
+    });
+    const item = await createFeedPurchase(fields);
+    expect(item.bags).toBe(3);
+    expect(item.totalLbs).toBe(150);
+    expect(item.type).toBe("poultry");
+
+    const formatted = formatFeedPurchase(item);
+    expect(formatted.bags).toBe(3);
+    expect(formatted.bagWeightLbs).toBe(50);
+    expect(formatted.totalLbs).toBe(150);
+    expect(formatted.feedType).toBe("poultry");
+    // No legacy-only fields leak in on a bag purchase.
+    expect(formatted.quantity).toBeUndefined();
+    expect(formatted.vendor).toBeUndefined();
   });
 });
 

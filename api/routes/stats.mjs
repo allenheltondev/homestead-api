@@ -6,6 +6,8 @@ import {
   birthStats,
   deathStats,
   feedStats,
+  eggStatsForPeriod,
+  eggCostStats,
   summaryStats,
   monthsForPeriod,
 } from "../domain/stats.mjs";
@@ -44,10 +46,47 @@ export function registerStatsRoutes(app) {
     return jsonResponse(200, await feedStats(months));
   });
 
+  // GET /stats/eggs?period=YYYY-MM|YYYY -- total eggs, dozens, days, perDay.
+  app.get("/stats/eggs", async ({ event }) => {
+    const period = resolvePeriodString(event);
+    const months = monthsForPeriod(period);
+    if (!months) throw new BadRequestError("period must be YYYY-MM or YYYY");
+    return jsonResponse(200, await eggStatsForPeriod(period, months));
+  });
+
+  // GET /stats/egg-cost?period=&storePricePerDozen= -- cost-per-dozen vs.
+  // the store price, on a poultry-feed basis.
+  app.get("/stats/egg-cost", async ({ event }) => {
+    const period = resolvePeriodString(event);
+    const months = monthsForPeriod(period);
+    if (!months) throw new BadRequestError("period must be YYYY-MM or YYYY");
+    const storePricePerDozen = parseStorePrice(event);
+    return jsonResponse(200, await eggCostStats(period, months, { storePricePerDozen }));
+  });
+
   // GET /stats/summary -- one speakable payload composing the above.
   app.get("/stats/summary", async () => {
     return jsonResponse(200, await summaryStats());
   });
+}
+
+// Reads ?period from the query string, defaulting to the current month, and
+// returns it as a string (callers expand it via monthsForPeriod and echo it
+// back in the response).
+function resolvePeriodString(event) {
+  return event?.queryStringParameters?.period ?? yyyymm();
+}
+
+// Parses ?storePricePerDozen into a non-negative float, or undefined when
+// absent so the domain layer falls back to the env default.
+function parseStorePrice(event) {
+  const raw = event?.queryStringParameters?.storePricePerDozen;
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new BadRequestError("storePricePerDozen must be a non-negative number");
+  }
+  return parsed;
 }
 
 // Reads ?period from the query string, defaulting to the current month.
