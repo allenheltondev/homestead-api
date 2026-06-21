@@ -1,24 +1,41 @@
 import { CognitoJwtVerifier } from "aws-jwt-verify";
 import { logger } from "./services/logger.mjs";
 
-// Lambda TOKEN authorizer for the API. Verifies a Cognito id token
-// (dashboard sign-in) via the user pool's JWKS and returns an IAM policy
-// plus a context object the routes read via
-// event.requestContext.authorizer to know who the caller is.
+// Lambda TOKEN authorizer for the API. Verifies a Cognito JWT via the
+// user pool's JWKS and returns an IAM policy plus a context object the
+// routes read via event.requestContext.authorizer.
+//
+// Two token shapes are accepted, for any of the allowed app clients:
+//   - id tokens     (dashboard sign-in)      -> validated on the `aud` claim
+//   - access tokens (Alexa account linking)  -> validated on `client_id`
+// Alexa account linking hands the skill an ACCESS token, so the API must
+// accept access tokens minted for the Alexa app client, not just id
+// tokens from the dashboard client.
 
 const USER_POOL_ID = process.env.USER_POOL_ID;
-const USER_POOL_CLIENT_ID = process.env.USER_POOL_CLIENT_ID;
 
-if (!USER_POOL_ID || !USER_POOL_CLIENT_ID) {
+// Dashboard client + optional dedicated Alexa app client. Empty/undefined
+// entries are dropped, so an unset ALEXA_CLIENT_ID is a no-op.
+const allowedClientIds = [
+  process.env.USER_POOL_CLIENT_ID,
+  process.env.ALEXA_CLIENT_ID,
+].filter(Boolean);
+
+if (!USER_POOL_ID || allowedClientIds.length === 0) {
   throw new Error("USER_POOL_ID and USER_POOL_CLIENT_ID env vars must be set.");
 }
 
-// Module-scope so JWKS stays cached across invocations in the same
-// execution environment. The verifier holds the JWKS internally.
-const cognitoVerifier = CognitoJwtVerifier.create({
+// Module-scope so each verifier's JWKS stays cached across invocations in
+// the same execution environment.
+const idVerifier = CognitoJwtVerifier.create({
   userPoolId: USER_POOL_ID,
   tokenUse: "id",
-  clientId: USER_POOL_CLIENT_ID,
+  clientId: allowedClientIds,
+});
+const accessVerifier = CognitoJwtVerifier.create({
+  userPoolId: USER_POOL_ID,
+  tokenUse: "access",
+  clientId: allowedClientIds,
 });
 
 export async function handler(event) {
@@ -32,24 +49,36 @@ export async function handler(event) {
 
   const methodArn = event.methodArn;
 
+  let payload;
+  let authSource;
   try {
-    const payload = await cognitoVerifier.verify(token);
-    return allow({
-      principalId: payload.sub,
-      methodArn,
-      context: {
-        sub: payload.sub,
-        email: payload.email ?? "",
-        authSource: "cognito",
-      },
-    });
-  } catch (err) {
-    // API Gateway only treats a thrown "Unauthorized" Error as a 401;
-    // anything else becomes a 500. Convert all auth failures into the
-    // canonical message but log details for ops.
-    logger.info("Authorizer: rejecting token", { reason: err?.message });
-    throw new Error("Unauthorized", { cause: err });
+    payload = await idVerifier.verify(token);
+    authSource = "cognito";
+  } catch (idErr) {
+    try {
+      payload = await accessVerifier.verify(token);
+      authSource = "cognito-access";
+    } catch (accessErr) {
+      // API Gateway only maps a thrown "Unauthorized" Error to a 401;
+      // anything else becomes a 500. Log both reasons for ops.
+      logger.info("Authorizer: rejecting token", {
+        idReason: idErr?.message,
+        accessReason: accessErr?.message,
+      });
+      throw new Error("Unauthorized", { cause: accessErr });
+    }
   }
+
+  return allow({
+    principalId: payload.sub,
+    methodArn,
+    context: {
+      sub: payload.sub,
+      // Access tokens don't carry an email claim; only id tokens do.
+      email: payload.email ?? "",
+      authSource,
+    },
+  });
 }
 
 function allow({ principalId, methodArn, context }) {

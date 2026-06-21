@@ -142,3 +142,13 @@ The skill ships as part of the same SAM stack:
   the **`AlexaSkillFunctionArn`** stack output.
 
 [asksdk]: https://github.com/alexa/alexa-skills-kit-sdk-for-nodejs
+
+## Token type: id vs access (authorizer)
+
+The API Lambda authorizer (`api/authorizer.mjs`) accepts **both** Cognito
+**id** tokens (dashboard sign-in) and **access** tokens (Alexa account
+linking), validated against the allowed app clients. Provide the Alexa
+app client id at deploy time via the `AlexaUserPoolClientId` template
+parameter (CI/deploy var `ALEXA_USER_POOL_CLIENT_ID`) so access tokens
+minted for the Alexa client pass `client_id` validation. If the Alexa
+skill reuses the dashboard app client, no extra config is needed.
