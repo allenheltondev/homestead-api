@@ -1,0 +1,36 @@
+{
+  "name": "homestead",
+  "version": "0.1.0",
+  "description": "Homestead API — single-table serverless API for tracking homestead animals, pastures, and feed",
+  "author": "allenheltondev",
+  "type": "module",
+  "license": "ISC",
+  "scripts": {
+    "lint": "eslint --cache --cache-location .eslintcache \"**/*.mjs\"",
+    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.config.mjs",
+    "test:integration": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.integration.config.mjs",
+    "build": "sam build --parallel"
+  },
+  "dependencies": {
+    "@aws-lambda-powertools/event-handler": "^2.33.1",
+    "@aws-lambda-powertools/idempotency": "^2.33.1",
+    "@aws-lambda-powertools/logger": "^2.33.1",
+    "@aws-lambda-powertools/parameters": "^2.33.1",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1054.0",
+    "@aws-sdk/client-dynamodb": "^3.1054.0",
+    "@aws-sdk/client-eventbridge": "^3.1054.0",
+    "@aws-sdk/lib-dynamodb": "^3.1054.0",
+    "@aws-sdk/util-dynamodb": "^3.996.2",
+    "aws-jwt-verify": "^5.1.1",
+    "ulid": "^3.0.2"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.7",
+    "@babel/preset-env": "^7.29.7",
+    "@eslint/js": "^10.0.1",
+    "babel-jest": "^30.3.0",
+    "eslint": "^10.4.1",
+    "globals": "^17.5.0",
+    "jest": "^30.3.0"
+  }
+}

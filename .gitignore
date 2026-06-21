@@ -94,6 +94,12 @@ dist
 # Serverless directories
 .serverless/
 
+# AWS SAM build output
+.aws-sam/
+
+# Local SAM deploy overrides (may contain parameter values/secrets)
+samconfig.local.toml
+
 # FuseBox cache
 .fusebox/
 

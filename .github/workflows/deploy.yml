@@ -1,0 +1,167 @@
+name: Deploy (staging)
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Single global group: every PR deploys to the same shared Staging
+  # stack, so concurrent PR runs must serialize, not race. False on
+  # cancel-in-progress so mid-deploy CFN updates aren't torn out from
+  # under themselves.
+  group: deploy-staging
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  STACK_NAME: homestead-api
+  ENVIRONMENT: staging
+
+jobs:
+  deploy:
+    name: sam deploy staging
+    # Dependabot PRs run with `Secret source: Dependabot`, which can't see
+    # AWS_DEPLOY_ROLE_ARN, so OIDC fails before sam deploy ever runs.
+    # DEPLOYMENTS_ENABLED gates the whole job so deploys stay SKIPPED
+    # (green) until the user flips the repo variable to 'true'. CI
+    # (lint+test) still gates every merge regardless.
+    if: ${{ github.actor != 'dependabot[bot]' && vars.DEPLOYMENTS_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: Staging
+      url: ${{ steps.outputs.outputs.dashboard-url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install esbuild on PATH
+        # SAM's NodejsNpmEsbuildBuilder shells out to `esbuild`. With
+        # --ignore-scripts above, the project-local copy never fetched its
+        # native binary, so a global install puts a working esbuild on PATH
+        # where the SAM builder looks first.
+        run: npm install -g esbuild
+
+      - name: Set up Python (for SAM CLI)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v3
+        with:
+          use-installer: true
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6.2.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: GitHubActions-Homestead-StagingDeploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: SAM build
+        run: sam build
+
+      - name: SAM deploy
+        run: |
+          sam deploy \
+            --config-env ci \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              "Environment=${{ env.ENVIRONMENT }}" \
+              "UserPoolId=${{ vars.USER_POOL_ID }}" \
+              "UserPoolClientId=${{ vars.USER_POOL_CLIENT_ID }}"
+
+      - name: Read stack outputs
+        id: outputs
+        run: |
+          OUTPUTS=$(aws cloudformation describe-stacks \
+            --stack-name "${{ env.STACK_NAME }}" \
+            --region "${{ env.AWS_REGION }}" \
+            --query "Stacks[0].Outputs" \
+            --output json)
+          read_out() {
+            echo "$OUTPUTS" | jq -r --arg k "$1" '.[] | select(.OutputKey==$k) | .OutputValue'
+          }
+          {
+            echo "api-url=$(read_out ApiBaseUrl)"
+            echo "table-name=$(read_out TableName)"
+            echo "dashboard-bucket=$(read_out DashboardBucketName)"
+            echo "dashboard-distribution-id=$(read_out DashboardDistributionId)"
+            echo "dashboard-url=$(read_out DashboardUrl)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Integration tests
+        # Runs against the just-deployed staging stack. A real Cognito id
+        # token is minted by the test client from the env below.
+        env:
+          STAGE_API_URL: ${{ steps.outputs.outputs.api-url }}
+          USER_POOL_CLIENT_ID: ${{ vars.USER_POOL_CLIENT_ID }}
+          TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
+          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+        run: npm run test:integration
+
+      - name: Install dashboard dependencies
+        # Guarded so the step no-ops until the ui/ app exists.
+        if: ${{ hashFiles('ui/package.json') != '' }}
+        working-directory: ui
+        run: npm ci
+
+      - name: Build dashboard
+        if: ${{ hashFiles('ui/package.json') != '' }}
+        working-directory: ui
+        env:
+          VITE_API_BASE_URL: ${{ steps.outputs.outputs.api-url }}
+          VITE_AWS_REGION: ${{ env.AWS_REGION }}
+          VITE_USER_POOL_ID: ${{ vars.USER_POOL_ID }}
+          VITE_USER_POOL_CLIENT_ID: ${{ vars.USER_POOL_CLIENT_ID }}
+        run: npm run build
+
+      - name: Sync dashboard to S3
+        if: ${{ hashFiles('ui/package.json') != '' }}
+        run: |
+          BUCKET="${{ steps.outputs.outputs.dashboard-bucket }}"
+          aws s3 sync ui/dist/ "s3://${BUCKET}/" \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "*.html"
+          aws s3 sync ui/dist/ "s3://${BUCKET}/" \
+            --cache-control "public, max-age=0, must-revalidate" \
+            --content-type "text/html; charset=utf-8" \
+            --exclude "*" \
+            --include "*.html"
+
+      - name: Invalidate CloudFront
+        if: ${{ hashFiles('ui/package.json') != '' }}
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.outputs.outputs.dashboard-distribution-id }}" \
+            --paths "/*"
+
+      - name: Write deployment summary
+        run: |
+          {
+            echo "## Homestead staging deploy"
+            echo
+            echo "- **Stack:** \`${{ env.STACK_NAME }}\`"
+            echo "- **Region:** \`${{ env.AWS_REGION }}\`"
+            echo "- **API URL:** ${{ steps.outputs.outputs.api-url }}"
+            echo "- **Dashboard URL:** ${{ steps.outputs.outputs.dashboard-url }}"
+            echo "- **Table:** \`${{ steps.outputs.outputs.table-name }}\`"
+            echo "- **Commit:** \`${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

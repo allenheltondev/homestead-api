@@ -1,0 +1,35 @@
+version = 0.1
+
+# UserPoolId + UserPoolClientId are NOT defined here. They feed the
+# Lambda authorizer's Cognito JWT verification; provide them via
+# samconfig.local.toml (gitignored) or --parameter-overrides for ad-hoc
+# deploys. CI sources them from GitHub environment vars
+# (vars.USER_POOL_ID, vars.USER_POOL_CLIENT_ID).
+#
+# CognitoUserPoolArn resolves from SSM `/readysetcloud/auth/user-pool-arn`
+# (published by rsc-core) at deploy time, no override needed.
+
+[default.build.parameters]
+parallel = true
+cached = false
+beta_features = true
+
+[ci.deploy.parameters]
+stack_name = "homestead-api"
+resolve_s3 = true
+s3_prefix = "homestead-api"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = [
+  "Environment=staging",
+]
+
+[prod.deploy.parameters]
+stack_name = "homestead-api"
+resolve_s3 = true
+s3_prefix = "homestead-api"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = [
+  "Environment=production",
+]
