@@ -13,7 +13,6 @@ jobs:
   test:
     name: Lint & Test
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -32,3 +31,42 @@ jobs:
 
       - name: Test
         run: npm test
+
+  sam:
+    name: SAM Validate & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies (+ esbuild on PATH for the SAM builder)
+        run: |
+          npm ci --ignore-scripts
+          npm install -g esbuild
+
+      - name: Install Alexa function dependencies
+        # The Alexa function bundles ask-sdk-core; esbuild resolves it from
+        # alexa/node_modules, so install them before sam build.
+        run: cd alexa && npm ci --ignore-scripts
+
+      - name: Set up Python (for SAM CLI)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v3
+        with:
+          use-installer: true
+
+      - name: SAM validate (cfn-lint, no AWS credentials needed)
+        run: sam validate --lint --region us-east-1
+
+      - name: SAM build
+        run: sam build --parallel

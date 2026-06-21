@@ -65,6 +65,15 @@ Parameters:
       Optional email subscribed to the CloudWatch alarm SNS topic (API 5xx
       rate, authorizer failures, throttling). Leave empty to create the
       alarms and topic without a notification subscription.
+  AlexaUserPoolClientId:
+    Type: String
+    Default: ""
+    Description: |
+      Optional Cognito app client id used by the Alexa skill's account
+      linking. The Lambda authorizer additionally accepts ACCESS tokens
+      minted for this client (Alexa account linking returns an access
+      token, not an id token). Leave empty if the skill reuses the
+      dashboard app client (UserPoolClientId).
 
 # Combined condition so partial-set (one param without the other) is a
 # no-op rather than a deploy error.
@@ -277,6 +286,7 @@ Resources:
         Variables:
           USER_POOL_ID: !Ref UserPoolId
           USER_POOL_CLIENT_ID: !Ref UserPoolClientId
+          ALEXA_CLIENT_ID: !Ref AlexaUserPoolClientId
       Policies:
         - AWSLambdaBasicExecutionRole
 
