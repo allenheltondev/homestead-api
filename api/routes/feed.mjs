@@ -20,15 +20,9 @@ export function registerFeedRoutes(app) {
     const fields = validateFeedPurchaseCreate(parseBody(event));
     const item = await createFeedPurchase(fields);
 
-    await publishEvent("FeedPurchased", {
-      id: item.id,
-      type: item.type,
-      quantity: item.quantity,
-      unit: item.unit,
-      cost: item.cost,
-      vendor: item.vendor,
-      purchasedAt: item.purchasedAt,
-    });
+    // Publish the formatted shape so the event carries whichever fields the
+    // payload set (legacy quantity/unit/vendor or the new bag fields).
+    await publishEvent("FeedPurchased", formatFeedPurchase(item));
 
     return jsonResponse(201, formatFeedPurchase(item));
   });
