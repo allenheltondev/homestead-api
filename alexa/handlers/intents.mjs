@@ -25,7 +25,14 @@ import {
   buildMoveFields,
   buildPeriodQuery,
 } from "../lib/slots.mjs";
-import { addEggStatsScreen, addEggCostScreen } from "../lib/apl.mjs";
+import {
+  addHomeScreen,
+  addHerdSummaryScreen,
+  addHerdCountScreen,
+  addConfirmationScreen,
+  addEggStatsScreen,
+  addEggCostScreen,
+} from "../lib/apl.mjs";
 
 const SKILL_NAME = "Homestead";
 const HELP_TEXT =
@@ -81,7 +88,7 @@ export const LaunchRequestHandler = {
     return handlerInput.requestEnvelope.request.type === "LaunchRequest";
   },
   handle(handlerInput) {
-    return handlerInput.responseBuilder
+    return addHomeScreen(handlerInput)
       .speak(`Welcome to ${SKILL_NAME}. ${HELP_TEXT}`)
       .reprompt(HELP_TEXT)
       .getResponse();
@@ -96,7 +103,7 @@ export const GetHerdSummaryIntentHandler = {
     try {
       const api = createApiClient(handlerInput);
       const summary = await api.getSummary();
-      return handlerInput.responseBuilder
+      return addHerdSummaryScreen(handlerInput, summary)
         .speak(renderSummary(summary))
         .getResponse();
     } catch (err) {
@@ -117,7 +124,7 @@ export const GetHerdCountIntentHandler = {
     try {
       const api = createApiClient(handlerInput);
       const herd = await api.getHerd();
-      return handlerInput.responseBuilder
+      return addHerdCountScreen(handlerInput, herd)
         .speak(renderHerdCount(herd))
         .getResponse();
     } catch (err) {
@@ -142,8 +149,13 @@ export const LogFeedPurchaseIntentHandler = {
     try {
       const api = createApiClient(handlerInput);
       const purchase = await api.recordFeedPurchase(fields);
-      return handlerInput.responseBuilder
-        .speak(renderFeedConfirmation(purchase ?? fields))
+      const text = renderFeedConfirmation(purchase ?? fields);
+      return addConfirmationScreen(
+        handlerInput,
+        "Feed purchase recorded",
+        text,
+      )
+        .speak(text)
         .getResponse();
     } catch (err) {
       return speakApiError(
@@ -192,8 +204,9 @@ export const RecordBirthIntentHandler = {
     try {
       const api = createApiClient(handlerInput);
       const result = await api.recordBirth(fields);
-      return handlerInput.responseBuilder
-        .speak(renderBirthConfirmation(result))
+      const text = renderBirthConfirmation(result);
+      return addConfirmationScreen(handlerInput, "Birth recorded", text)
+        .speak(text)
         .getResponse();
     } catch (err) {
       return speakApiError(

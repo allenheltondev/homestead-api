@@ -1,35 +1,151 @@
 // APL helpers for the Homestead skill. Each `add*Screen` function gates on the
-// device's `Alexa.Presentation.APL` interface so the skill stays
-// voice-only on headless devices (Echo Dot, phone) and adds a visual screen
-// only where it's supported. The datasource builders are pure so they can be
-// unit-tested without ask-sdk.
+// device's `Alexa.Presentation.APL` interface so the skill stays voice-only on
+// headless devices (Echo Dot, phone) and adds a visual screen only where it's
+// supported. The datasource builders are pure so they can be unit-tested
+// without ask-sdk.
+//
+// This module is the UNION of the herd visuals (home / herd summary / herd
+// count / confirmation) and the egg visuals (egg stats / egg cost).
 
 import {
+  herdScreenDocument,
+  confirmationDocument,
+  homeDocument,
   eggStatsDocument,
   eggCostDocument,
   COLORS,
 } from "../apl/documents.mjs";
+
+const APL_INTERFACE = "Alexa.Presentation.APL";
 
 // True when the requesting device supports APL. Reads the supported-interfaces
 // map off the request envelope, the same gate the rest of the skill uses.
 export function supportsApl(handlerInput) {
   const interfaces =
     handlerInput?.requestEnvelope?.context?.System?.device
-      ?.supportedInterfaces ?? {};
-  return Boolean(interfaces["Alexa.Presentation.APL"]);
+      ?.supportedInterfaces;
+  return Boolean(interfaces && interfaces[APL_INTERFACE]);
 }
 
-// Adds a RenderDocument directive to the response builder. No-op (returns the
-// builder unchanged) when the device can't render APL.
-function renderDocument(handlerInput, token, document, datasources) {
-  if (!supportsApl(handlerInput)) return handlerInput.responseBuilder;
-  return handlerInput.responseBuilder.addDirective({
+// Adds a RenderDocument directive only on APL devices; returns the
+// responseBuilder either way so callers can chain .speak().getResponse().
+function render(handlerInput, token, document, datasources) {
+  const rb = handlerInput.responseBuilder;
+  if (!supportsApl(handlerInput)) return rb;
+  return rb.addDirective({
     type: "Alexa.Presentation.APL.RenderDocument",
     token,
     document,
     datasources,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Herd visuals (home / herd summary / herd count / confirmation)
+// ---------------------------------------------------------------------------
+
+function capitalize(value) {
+  const text = String(value ?? "");
+  return text ? text[0].toUpperCase() + text.slice(1) : text;
+}
+
+function plural(count, noun) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function money(amount) {
+  const value = Number(amount) || 0;
+  return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
+}
+
+function friendlyDate(now) {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  }).format(now);
+}
+
+// GET /stats/summary -> herd screen datasource.
+export function buildSummaryData(summary, now = new Date()) {
+  const herd = summary?.herd ?? {};
+  const bySpecies = Array.isArray(herd.bySpecies) ? herd.bySpecies : [];
+  const total = herd.totalAnimals ?? 0;
+  const births = summary?.births?.thisMonth ?? 0;
+  const deaths = summary?.deaths?.thisMonth ?? 0;
+  const feed = summary?.feed?.thisMonthSpend ?? 0;
+  return {
+    title: "Herd Summary",
+    subtitle: friendlyDate(now),
+    total: plural(total, "animal"),
+    species: bySpecies.map((s) => ({
+      name: capitalize(s.species ?? "animal"),
+      count: String(s.active ?? s.total ?? 0),
+    })),
+    footer: [
+      plural(births, "birth"),
+      plural(deaths, "death"),
+      `${money(feed)} feed`,
+    ],
+  };
+}
+
+// GET /stats/herd -> herd screen datasource.
+export function buildHerdData(herd, now = new Date()) {
+  const total = herd?.total ?? 0;
+  const active = herd?.byStatus?.active ?? 0;
+  const entries = Object.entries(herd?.bySpecies ?? {});
+  return {
+    title: "Herd Count",
+    subtitle: friendlyDate(now),
+    total: plural(total, "animal"),
+    species: entries.map(([name, s]) => ({
+      name: capitalize(name),
+      count: String(s?.total ?? 0),
+    })),
+    footer: [`${active} active`, `${entries.length} species`, ""],
+  };
+}
+
+export function buildConfirmationData(title, message) {
+  return { title, message: message ?? "" };
+}
+
+export function addHomeScreen(handlerInput) {
+  return render(handlerInput, "home", homeDocument, {
+    homestead: {
+      title: "Homestead",
+      subtitle: "Your herd at a glance",
+      hints: [
+        "“Ask Homestead for my herd summary”",
+        "“How many animals do I have?”",
+        "“Record a birth”  ·  “Record a feed purchase”",
+      ],
+    },
+  });
+}
+
+export function addHerdSummaryScreen(handlerInput, summary, now) {
+  return render(handlerInput, "herd-summary", herdScreenDocument, {
+    homestead: buildSummaryData(summary, now),
+  });
+}
+
+export function addHerdCountScreen(handlerInput, herd, now) {
+  return render(handlerInput, "herd-count", herdScreenDocument, {
+    homestead: buildHerdData(herd, now),
+  });
+}
+
+export function addConfirmationScreen(handlerInput, title, message) {
+  return render(handlerInput, "confirmation", confirmationDocument, {
+    confirmation: buildConfirmationData(title, message),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Egg visuals (egg stats / egg cost)
+// ---------------------------------------------------------------------------
 
 // Pure datasource builder for the egg-stats screen.
 export function buildEggStatsDatasource(stats) {
@@ -86,7 +202,7 @@ export function buildEggCostDatasource(cost) {
 
 // Attaches the egg-stats screen to the response (when supported).
 export function addEggStatsScreen(handlerInput, stats) {
-  return renderDocument(
+  return render(
     handlerInput,
     "eggStatsToken",
     eggStatsDocument,
@@ -96,7 +212,7 @@ export function addEggStatsScreen(handlerInput, stats) {
 
 // Attaches the egg-cost screen to the response (when supported).
 export function addEggCostScreen(handlerInput, cost) {
-  return renderDocument(
+  return render(
     handlerInput,
     "eggCostToken",
     eggCostDocument,
