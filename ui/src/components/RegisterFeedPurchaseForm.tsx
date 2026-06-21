@@ -16,6 +16,7 @@ interface FormState {
   bagWeightLbs: string;
   cost: string;
   date: string;
+  flock: string;
 }
 
 const EMPTY: FormState = {
@@ -24,6 +25,7 @@ const EMPTY: FormState = {
   bagWeightLbs: '',
   cost: '',
   date: '',
+  flock: '',
 };
 
 // Records a feed-by-the-bag purchase. feedType/bags/bagWeightLbs are required;
@@ -80,6 +82,8 @@ export default function RegisterFeedPurchaseForm({
     };
     if (form.cost.trim().length > 0) payload.cost = cost;
     if (form.date) payload.date = form.date;
+    const flock = form.flock.trim();
+    if (flock.length > 0) payload.flock = flock;
 
     onSubmit(payload);
   };
@@ -145,6 +149,21 @@ export default function RegisterFeedPurchaseForm({
           {totalLbs === null ? '—' : `${totalLbs.toLocaleString()} lb`}
         </span>
       </div>
+
+      <label className="block">
+        <span className="field-label">Flock</span>
+        <input
+          type="text"
+          className="input"
+          value={form.flock}
+          onChange={(e) => update('flock', e.target.value)}
+          placeholder="Optional — e.g. layers, pullets"
+          disabled={busy}
+        />
+        <span className="field-hint mt-1 block">
+          Attributes poultry feed to a flock for per-flock cost analytics.
+        </span>
+      </label>
 
       <label className="block">
         <span className="field-label">Purchased on</span>

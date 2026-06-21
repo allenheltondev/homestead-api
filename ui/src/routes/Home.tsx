@@ -2,17 +2,19 @@ import type { ReactElement, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApiFetch } from '../auth/useApiFetch';
-import { getEggCost, getFeedStats, getStatsSummary } from '../api/stats';
-import type { EggCostStats, FeedStats, StatsSummary } from '../api/types';
+import { getDigest, getEggCost, getFeedStats, getStatsSummary } from '../api/stats';
+import type { DigestStats, EggCostStats, FeedStats, StatsSummary } from '../api/types';
 import HerdChart from '../components/HerdChart';
 import FeedSpendChart from '../components/FeedSpendChart';
 import EggCostCard from '../components/EggCostCard';
+import DigestCard from '../components/DigestCard';
 import { formatMoney } from '../components/format';
 
 interface DashboardData {
   summary: StatsSummary;
   feed: FeedStats | null;
   eggCost: EggCostStats | null;
+  digest: DigestStats | null;
 }
 
 export default function Home(): ReactElement {
@@ -31,10 +33,12 @@ export default function Home(): ReactElement {
       getFeedStats(apiFetch).catch(() => null),
       // Best-effort: cost-per-dozen card for the current month.
       getEggCost(apiFetch).catch(() => null),
+      // Best-effort: the "this week" digest card.
+      getDigest(apiFetch).catch(() => null),
     ])
-      .then(([summary, feed, eggCost]) => {
+      .then(([summary, feed, eggCost, digest]) => {
         if (cancelled) return;
-        setData({ summary, feed, eggCost });
+        setData({ summary, feed, eggCost, digest });
       })
       .catch((err: Error) => {
         if (!cancelled) setError(err.message);
@@ -63,7 +67,7 @@ export default function Home(): ReactElement {
     );
   }
 
-  const { summary, feed, eggCost } = data;
+  const { summary, feed, eggCost, digest } = data;
   const noData = summary.herd.totalAnimals === 0 && summary.pastures.total === 0;
 
   if (noData) {
@@ -85,6 +89,8 @@ export default function Home(): ReactElement {
   return (
     <section className="space-y-8">
       <DashboardHeader />
+
+      {digest && <DigestCard digest={digest} />}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard

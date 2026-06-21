@@ -42,6 +42,9 @@ function NavItems({
       <NavLink to="/eggs" className={className} onClick={onNavigate}>
         Eggs
       </NavLink>
+      <NavLink to="/health" className={className} onClick={onNavigate}>
+        Health
+      </NavLink>
     </>
   );
 }

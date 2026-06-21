@@ -19,6 +19,7 @@ interface FormState {
   bags: string;
   bagWeightLbs: string;
   date: string;
+  flock: string;
 }
 
 const EMPTY: FormState = {
@@ -28,6 +29,7 @@ const EMPTY: FormState = {
   bags: '',
   bagWeightLbs: '',
   date: '',
+  flock: '',
 };
 
 // Records feed consumption. feedType is required; supply usage either as a
@@ -93,6 +95,8 @@ export default function RegisterFeedUsageForm({
     }
 
     if (form.date) payload.date = form.date;
+    const flock = form.flock.trim();
+    if (flock.length > 0) payload.flock = flock;
 
     onSubmit(payload);
   };
@@ -183,6 +187,21 @@ export default function RegisterFeedUsageForm({
           {totalLbs === null ? '—' : `${totalLbs.toLocaleString()} lb`}
         </span>
       </div>
+
+      <label className="block">
+        <span className="field-label">Flock</span>
+        <input
+          type="text"
+          className="input"
+          value={form.flock}
+          onChange={(e) => update('flock', e.target.value)}
+          placeholder="Optional — e.g. layers, pullets"
+          disabled={busy}
+        />
+        <span className="field-hint mt-1 block">
+          Attributes poultry feed to a flock for per-flock cost analytics.
+        </span>
+      </label>
 
       <label className="block">
         <span className="field-label">Used on</span>
