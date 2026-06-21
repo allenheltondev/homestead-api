@@ -8,6 +8,10 @@ import {
   renderEggCost,
   renderFeedUsageLogged,
   renderFeedInventory,
+  renderHealthExpenseLogged,
+  renderHealthStats,
+  renderMortality,
+  renderDigest,
   __testables,
 } from "../lib/speech.mjs";
 
@@ -256,5 +260,98 @@ describe("renderFeedInventory", () => {
 
   test("null payload", () => {
     expect(renderFeedInventory(null)).toMatch(/couldn't read/);
+  });
+});
+
+describe("renderHealthExpenseLogged", () => {
+  test("reads back the amount and category", () => {
+    const speech = renderHealthExpenseLogged({ category: "vet", cost: 60 });
+    expect(speech).toContain("60 dollars");
+    expect(speech).toContain("vet expense");
+  });
+
+  test("singular dollar", () => {
+    expect(renderHealthExpenseLogged({ category: "medicine", cost: 1 })).toContain(
+      "1 dollar medicine expense",
+    );
+  });
+
+  test("falls back without a cost", () => {
+    expect(renderHealthExpenseLogged({ category: "supplies" })).toMatch(
+      /supplies expense/,
+    );
+  });
+
+  test("null payload", () => {
+    expect(renderHealthExpenseLogged(null)).toMatch(/recorded that health expense/);
+  });
+});
+
+describe("renderHealthStats", () => {
+  test("speaks the total spend and a category breakdown", () => {
+    const speech = renderHealthStats({
+      total: 150,
+      periodLabel: "this month",
+      byCategory: [
+        { category: "vet", cost: 90 },
+        { category: "medicine", cost: 60 },
+      ],
+    });
+    expect(speech).toContain("150 dollars on animal health this month");
+    expect(speech).toContain("90 dollars on vet");
+    expect(speech).toContain("60 dollars on medicine");
+  });
+
+  test("handles no spend", () => {
+    expect(renderHealthStats({ total: 0 })).toMatch(/haven't spent anything/);
+  });
+
+  test("null payload", () => {
+    expect(renderHealthStats(null)).toMatch(/couldn't read/);
+  });
+});
+
+describe("renderMortality", () => {
+  test("speaks deaths and a fractional loss rate", () => {
+    const speech = renderMortality({
+      deaths: 2,
+      lossRate: 0.04,
+      periodLabel: "this year",
+    });
+    expect(speech).toContain("2 animals this year");
+    expect(speech).toContain("4 percent loss rate");
+  });
+
+  test("accepts an already-percentage rate", () => {
+    const speech = renderMortality({ deaths: 1, lossRate: 5 });
+    expect(speech).toContain("5 percent loss rate");
+  });
+
+  test("celebrates zero losses", () => {
+    expect(renderMortality({ deaths: 0 })).toMatch(/haven't lost any animals/);
+  });
+
+  test("null payload", () => {
+    expect(renderMortality(null)).toMatch(/couldn't read/);
+  });
+});
+
+describe("renderDigest", () => {
+  test("speaks the API-supplied lines after an intro", () => {
+    const speech = renderDigest({
+      title: "Your weekly digest",
+      lines: ["You collected 84 eggs.", "You spent 40 dollars on feed."],
+    });
+    expect(speech).toContain("Your weekly digest");
+    expect(speech).toContain("You collected 84 eggs.");
+    expect(speech).toContain("You spent 40 dollars on feed.");
+  });
+
+  test("handles an empty digest", () => {
+    expect(renderDigest({ lines: [] })).toMatch(/nothing to report/);
+  });
+
+  test("null payload", () => {
+    expect(renderDigest(null)).toMatch(/couldn't put together/);
   });
 });

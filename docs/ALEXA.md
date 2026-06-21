@@ -267,3 +267,39 @@ Two intents extend the feed workflow beyond purchases:
   screen (`feedInventoryDocument`): one labeled on-hand bar per feed type plus a
   days-remaining readout (`addFeedInventoryScreen` /
   `buildFeedInventoryDatasource`, gated on `Alexa.Presentation.APL`).
+
+## Health, mortality & weekly digest
+
+Three insight features extend the read/write surface:
+
+- **RecordHealthExpenseIntent** (`RecordHealthExpenseIntentHandler`) — a
+  dialog-managed write intent (same `addDelegateDirective()` pattern as the
+  other writes). Required slots are `category` (the `HealthCategory` custom
+  slot: vet / medicine / supplies / testing) and `cost` (`AMAZON.NUMBER`);
+  `animalRef` and `date` are optional. `buildHealthExpenseFields`
+  (`alexa/lib/slots.mjs`) maps them to the `POST /health-expenses` body.
+  One-shot: "I spent 60 dollars at the vet today"; partial: "I had a vet bill"
+  (Alexa elicits the missing slots, then confirms). The confirmation is spoken
+  by `renderHealthExpenseLogged` and, on APL devices, shown on the shared
+  confirmation screen.
+- **GetHealthStatsIntent** (`GetHealthStatsIntentHandler`) — read-only, optional
+  `period`. Calls `GET /stats/health` and speaks the total health spend with an
+  optional by-category breakdown (`renderHealthStats`). "How much have I spent
+  on vet bills this month".
+- **GetMortalityIntent** (`GetMortalityIntentHandler`) — read-only, optional
+  `period`. Calls `GET /stats/mortality` and speaks how many animals were lost
+  plus the loss rate as a percentage (`renderMortality`, which accepts either a
+  fractional `lossRate` like `0.04` or an already-percentage value). "What's my
+  loss rate this year", "how many animals died".
+- **GetWeeklyDigestIntent** (`GetWeeklyDigestIntentHandler`) — read-only. Calls
+  `GET /stats/digest` and speaks the API-supplied `lines` array as one
+  paragraph (`renderDigest`). "Give me my homestead digest", "what's my weekly
+  summary".
+
+### Per-flock egg cost
+
+`GetEggCostIntent` gains an optional `flock` slot ("cost per dozen for the
+{flock} coop"). `buildEggCostQuery` (`alexa/lib/slots.mjs`) combines the
+existing optional `period` with the new optional `flock`, and `api.getEggCost`
+forwards `flock` as a query-string filter on `GET /stats/egg-cost`. All prior
+egg-cost utterances keep working unchanged.

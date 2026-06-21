@@ -14,6 +14,10 @@ const getEggStats = jest.fn();
 const getEggCost = jest.fn();
 const recordFeedUsage = jest.fn();
 const getFeedInventory = jest.fn();
+const recordHealthExpense = jest.fn();
+const getHealthStats = jest.fn();
+const getMortality = jest.fn();
+const getDigest = jest.fn();
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -42,6 +46,10 @@ jest.unstable_mockModule("../lib/api.mjs", () => ({
     getEggCost,
     recordFeedUsage,
     getFeedInventory,
+    recordHealthExpense,
+    getHealthStats,
+    getMortality,
+    getDigest,
   }),
   ApiError,
   MissingTokenError,
@@ -61,6 +69,10 @@ const {
   GetEggCostIntentHandler,
   LogFeedUsageIntentHandler,
   GetFeedInventoryIntentHandler,
+  RecordHealthExpenseIntentHandler,
+  GetHealthStatsIntentHandler,
+  GetMortalityIntentHandler,
+  GetWeeklyDigestIntentHandler,
   HelpIntentHandler,
   CancelAndStopIntentHandler,
   FallbackIntentHandler,
@@ -434,6 +446,137 @@ describe("egg read intents + APL gating", () => {
     );
     expect(res.speech).toContain("cheaper than the $4 store price");
     expect(res.directives).toHaveLength(1);
+  });
+
+  test("GetEggCost passes an optional flock filter through", async () => {
+    getEggCost.mockResolvedValue({ costPerDozen: 2 });
+    await GetEggCostIntentHandler.handle(
+      handlerInput(
+        intentRequest("GetEggCostIntent", { flock: { value: "north coop" } }),
+      ),
+    );
+    expect(getEggCost).toHaveBeenCalledWith({ flock: "north coop" });
+  });
+});
+
+describe("RecordHealthExpenseIntent (dialog-delegated write)", () => {
+  test("delegates while the dialog is incomplete", async () => {
+    const res = await RecordHealthExpenseIntentHandler.handle(
+      handlerInput(
+        intentRequest("RecordHealthExpenseIntent", {}, "IN_PROGRESS"),
+      ),
+    );
+    expect(res.delegated).toBe(true);
+    expect(recordHealthExpense).not.toHaveBeenCalled();
+  });
+
+  test("posts category + cost when COMPLETED and confirms", async () => {
+    recordHealthExpense.mockResolvedValue({ category: "vet", cost: 60 });
+    const res = await RecordHealthExpenseIntentHandler.handle(
+      handlerInput(
+        intentRequest("RecordHealthExpenseIntent", {
+          category: { value: "vet" },
+          cost: { value: "60" },
+        }),
+        { apl: true },
+      ),
+    );
+    expect(recordHealthExpense).toHaveBeenCalledWith({
+      category: "vet",
+      cost: 60,
+    });
+    expect(res.delegated).toBe(false);
+    expect(res.speech).toContain("60 dollars");
+    expect(res.speech).toContain("vet expense");
+    // Confirmation screen on APL devices.
+    expect(res.directives).toHaveLength(1);
+  });
+
+  test("surfaces auth errors on COMPLETED", async () => {
+    recordHealthExpense.mockRejectedValue(new MissingTokenError());
+    const res = await RecordHealthExpenseIntentHandler.handle(
+      handlerInput(
+        intentRequest("RecordHealthExpenseIntent", {
+          category: { value: "medicine" },
+          cost: { value: "25" },
+        }),
+      ),
+    );
+    expect(res.linkAccount).toBe(true);
+  });
+});
+
+describe("GetHealthStatsIntent", () => {
+  test("calls getHealthStats and speaks the spend", async () => {
+    getHealthStats.mockResolvedValue({
+      total: 150,
+      periodLabel: "this month",
+    });
+    const res = await GetHealthStatsIntentHandler.handle(
+      handlerInput(
+        intentRequest("GetHealthStatsIntent", { period: { value: "this month" } }),
+      ),
+    );
+    expect(getHealthStats).toHaveBeenCalledWith({ period: "this month" });
+    expect(res.speech).toContain("150 dollars on animal health this month");
+  });
+
+  test("prompts to link account on a 401", async () => {
+    getHealthStats.mockRejectedValue(new ApiError(401, "Unauthorized"));
+    const res = await GetHealthStatsIntentHandler.handle(
+      handlerInput(intentRequest("GetHealthStatsIntent")),
+    );
+    expect(res.linkAccount).toBe(true);
+  });
+});
+
+describe("GetMortalityIntent", () => {
+  test("calls getMortality and speaks the loss rate", async () => {
+    getMortality.mockResolvedValue({
+      deaths: 2,
+      lossRate: 0.04,
+      periodLabel: "this year",
+    });
+    const res = await GetMortalityIntentHandler.handle(
+      handlerInput(
+        intentRequest("GetMortalityIntent", { period: { value: "this year" } }),
+      ),
+    );
+    expect(getMortality).toHaveBeenCalledWith({ period: "this year" });
+    expect(res.speech).toContain("2 animals this year");
+    expect(res.speech).toContain("4 percent loss rate");
+  });
+
+  test("speaks a generic error on a 500", async () => {
+    getMortality.mockRejectedValue(new ApiError(500, "boom"));
+    const res = await GetMortalityIntentHandler.handle(
+      handlerInput(intentRequest("GetMortalityIntent")),
+    );
+    expect(res.linkAccount).toBe(false);
+    expect(res.speech).toMatch(/couldn't get your mortality stats/);
+  });
+});
+
+describe("GetWeeklyDigestIntent", () => {
+  test("calls getDigest and speaks the lines", async () => {
+    getDigest.mockResolvedValue({
+      title: "Your weekly digest",
+      lines: ["You collected 84 eggs.", "You lost no animals."],
+    });
+    const res = await GetWeeklyDigestIntentHandler.handle(
+      handlerInput(intentRequest("GetWeeklyDigestIntent")),
+    );
+    expect(getDigest).toHaveBeenCalledTimes(1);
+    expect(res.speech).toContain("You collected 84 eggs.");
+    expect(res.speech).toContain("You lost no animals.");
+  });
+
+  test("prompts to link account on MissingTokenError", async () => {
+    getDigest.mockRejectedValue(new MissingTokenError());
+    const res = await GetWeeklyDigestIntentHandler.handle(
+      handlerInput(intentRequest("GetWeeklyDigestIntent")),
+    );
+    expect(res.linkAccount).toBe(true);
   });
 });
 

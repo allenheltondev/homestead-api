@@ -68,6 +68,39 @@
               }
             }
           ]
+        },
+        {
+          "name": "HealthCategory",
+          "values": [
+            {
+              "id": "vet",
+              "name": {
+                "value": "vet",
+                "synonyms": ["vet", "vet bill", "vet visit", "veterinarian", "veterinary", "vet call"]
+              }
+            },
+            {
+              "id": "medicine",
+              "name": {
+                "value": "medicine",
+                "synonyms": ["medicine", "medication", "meds", "dewormer", "wormer", "antibiotics", "vaccine", "vaccines", "vaccination"]
+              }
+            },
+            {
+              "id": "supplies",
+              "name": {
+                "value": "supplies",
+                "synonyms": ["supplies", "supply", "equipment", "first aid", "bandages"]
+              }
+            },
+            {
+              "id": "testing",
+              "name": {
+                "value": "testing",
+                "synonyms": ["testing", "test", "lab", "lab work", "bloodwork"]
+              }
+            }
+          ]
         }
       ],
       "intents": [
@@ -197,14 +230,18 @@
         {
           "name": "GetEggCostIntent",
           "slots": [
-            { "name": "period", "type": "AMAZON.SearchQuery" }
+            { "name": "period", "type": "AMAZON.SearchQuery" },
+            { "name": "flock", "type": "AMAZON.SearchQuery" }
           ],
           "samples": [
             "how much do my eggs cost {period}",
             "what does a dozen eggs cost me",
             "egg cost",
             "what's my egg cost {period}",
-            "are my eggs cheaper than the store"
+            "are my eggs cheaper than the store",
+            "cost per dozen for the {flock} coop",
+            "what does a dozen eggs cost for the {flock} flock",
+            "egg cost for the {flock} coop"
           ]
         },
         {
@@ -241,6 +278,67 @@
             "when will I run out of feed",
             "what's my feed inventory",
             "feed inventory"
+          ]
+        },
+        {
+          "name": "RecordHealthExpenseIntent",
+          "slots": [
+            { "name": "category", "type": "HealthCategory" },
+            { "name": "cost", "type": "AMAZON.NUMBER" },
+            { "name": "animalRef", "type": "AMAZON.SearchQuery" },
+            { "name": "date", "type": "AMAZON.DATE" }
+          ],
+          "samples": [
+            "I spent {cost} dollars at the vet {date}",
+            "I spent {cost} dollars on {category} {date}",
+            "log a {cost} dollar {category} expense",
+            "record a {category} expense of {cost} dollars",
+            "I spent {cost} dollars on {category} for {animalRef}",
+            "I had a vet bill",
+            "I had a {category} expense",
+            "record a health expense",
+            "log a health expense"
+          ]
+        },
+        {
+          "name": "GetHealthStatsIntent",
+          "slots": [
+            { "name": "period", "type": "AMAZON.SearchQuery" }
+          ],
+          "samples": [
+            "how much have I spent on vet bills {period}",
+            "how much have I spent on health {period}",
+            "what are my health costs {period}",
+            "what's my health spending",
+            "how much have I spent on animal health",
+            "health stats",
+            "health spending"
+          ]
+        },
+        {
+          "name": "GetMortalityIntent",
+          "slots": [
+            { "name": "period", "type": "AMAZON.SearchQuery" }
+          ],
+          "samples": [
+            "what's my loss rate {period}",
+            "what's my loss rate this year",
+            "how many animals died {period}",
+            "how many animals have died",
+            "what's my mortality rate",
+            "how many animals did I lose {period}",
+            "mortality stats"
+          ]
+        },
+        {
+          "name": "GetWeeklyDigestIntent",
+          "samples": [
+            "give me my homestead digest",
+            "what's my weekly summary",
+            "give me my weekly digest",
+            "what's my homestead digest",
+            "for my weekly summary",
+            "homestead digest"
           ]
         }
       ]
@@ -439,6 +537,39 @@
               "elicitationRequired": false
             }
           ]
+        },
+        {
+          "name": "RecordHealthExpenseIntent",
+          "confirmationRequired": true,
+          "prompts": { "confirmation": "Confirm.Intent.RecordHealthExpense" },
+          "slots": [
+            {
+              "name": "category",
+              "type": "HealthCategory",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.healthCategory" }
+            },
+            {
+              "name": "cost",
+              "type": "AMAZON.NUMBER",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.healthCost" }
+            },
+            {
+              "name": "animalRef",
+              "type": "AMAZON.SearchQuery",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            },
+            {
+              "name": "date",
+              "type": "AMAZON.DATE",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            }
+          ]
         }
       ]
     },
@@ -537,6 +668,24 @@
         "id": "Confirm.Intent.LogFeedUsage",
         "variations": [
           { "type": "PlainText", "value": "{amount} pounds of {feedType} feed. Should I log it?" }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.healthCategory",
+        "variations": [
+          { "type": "PlainText", "value": "What kind of health expense was it? For example vet, medicine, or supplies." }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.healthCost",
+        "variations": [
+          { "type": "PlainText", "value": "How much did it cost, in dollars?" }
+        ]
+      },
+      {
+        "id": "Confirm.Intent.RecordHealthExpense",
+        "variations": [
+          { "type": "PlainText", "value": "A {cost} dollar {category} expense. Should I add it?" }
         ]
       }
     ]

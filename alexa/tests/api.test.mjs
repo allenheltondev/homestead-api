@@ -139,6 +139,79 @@ describe("createApiClient", () => {
     );
   });
 
+  test("getEggCost appends a flock filter", async () => {
+    const fetchMock = mockFetch(200, { costPerDozen: 2.1 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getEggCost({ flock: "north" });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.example.test/v1/stats/egg-cost?flock=north",
+    );
+  });
+
+  test("getEggCost appends both period and flock", async () => {
+    const fetchMock = mockFetch(200, { costPerDozen: 2.1 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getEggCost({ period: "this month", flock: "north" });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.example.test/v1/stats/egg-cost?period=this+month&flock=north",
+    );
+  });
+
+  test("recordHealthExpense POSTs JSON to /health-expenses", async () => {
+    const fetchMock = mockFetch(201, { id: "h1", category: "vet", cost: 60 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.recordHealthExpense({ category: "vet", cost: 60 });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.example.test/v1/health-expenses");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ category: "vet", cost: 60 });
+  });
+
+  test("getHealthStats GETs /stats/health with the period query", async () => {
+    const fetchMock = mockFetch(200, { total: 150 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getHealthStats({ period: "this month" });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.example.test/v1/stats/health?period=this+month",
+    );
+  });
+
+  test("getMortality GETs /stats/mortality, omitting an empty query", async () => {
+    const fetchMock = mockFetch(200, { deaths: 2 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getMortality({});
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.example.test/v1/stats/mortality",
+    );
+  });
+
+  test("getDigest GETs /stats/digest", async () => {
+    const fetchMock = mockFetch(200, { lines: ["a", "b"] });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getDigest();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.example.test/v1/stats/digest");
+    expect(init.method).toBe("GET");
+  });
+
   test("recordFeedUsage POSTs lbs + feedType to /feed-consumption", async () => {
     const fetchMock = mockFetch(201, { id: "fc1", lbs: 25, feedType: "chicken" });
     global.fetch = fetchMock;
