@@ -209,4 +209,33 @@ export function buildPeriodQuery(intent) {
   return period ? { period } : {};
 }
 
+// Builds the read-only egg-cost query: an optional `period` plus an optional
+// `flock` (coop) filter. Either, both, or neither may be present.
+export function buildEggCostQuery(intent) {
+  const query = buildPeriodQuery(intent);
+  const flock = textSlot(intent, "flock");
+  if (flock) query.flock = flock;
+  return query;
+}
+
+// Builds the POST /health-expenses body for the dialog-delegated
+// RecordHealthExpenseIntent. Required slots (category + cost) are guaranteed by
+// the dialog model on COMPLETED; animalRef and date are optional.
+export function buildHealthExpenseFields(intent) {
+  const category = textSlot(intent, "category");
+  const fields = {};
+  if (category) fields.category = category;
+
+  const cost = parseCount(slotValue(intent, "cost"));
+  if (Number.isFinite(cost)) fields.cost = cost;
+
+  const animalRef = textSlot(intent, "animalRef");
+  if (animalRef) fields.animalRef = animalRef;
+
+  const date = slotValue(intent, "date");
+  if (isIsoDate(date)) fields.date = date.trim();
+
+  return fields;
+}
+
 export const __testables = { normalizeUnit, parseCount };

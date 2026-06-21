@@ -6,7 +6,9 @@ import {
   buildDeathFields,
   buildMoveFields,
   buildPeriodQuery,
+  buildEggCostQuery,
   buildFeedUsageFields,
+  buildHealthExpenseFields,
   __testables,
 } from "../lib/slots.mjs";
 
@@ -249,5 +251,69 @@ describe("buildPeriodQuery", () => {
   });
   test("empty object when absent", () => {
     expect(buildPeriodQuery(intentWith({}))).toEqual({});
+  });
+});
+
+describe("buildEggCostQuery", () => {
+  test("includes an optional flock alongside the period", () => {
+    expect(
+      buildEggCostQuery(
+        intentWith({
+          period: { value: "this month" },
+          flock: { value: "north coop" },
+        }),
+      ),
+    ).toEqual({ period: "this month", flock: "north coop" });
+  });
+  test("flock only", () => {
+    expect(
+      buildEggCostQuery(intentWith({ flock: { value: "south" } })),
+    ).toEqual({ flock: "south" });
+  });
+  test("empty object when neither is present", () => {
+    expect(buildEggCostQuery(intentWith({}))).toEqual({});
+  });
+});
+
+describe("buildHealthExpenseFields", () => {
+  test("maps category, cost, animalRef, and date", () => {
+    const fields = buildHealthExpenseFields(
+      intentWith({
+        category: {
+          value: "vet bill",
+          resolutions: {
+            resolutionsPerAuthority: [{ values: [{ value: { name: "vet" } }] }],
+          },
+        },
+        cost: { value: "60" },
+        animalRef: { value: "Bessie" },
+        date: { value: "2026-06-21" },
+      }),
+    );
+    expect(fields).toEqual({
+      category: "vet",
+      cost: 60,
+      animalRef: "Bessie",
+      date: "2026-06-21",
+    });
+  });
+
+  test("omits optional animalRef and date when absent", () => {
+    const fields = buildHealthExpenseFields(
+      intentWith({ category: { value: "medicine" }, cost: { value: "25" } }),
+    );
+    expect(fields).toEqual({ category: "medicine", cost: 25 });
+  });
+
+  test("drops an invalid date", () => {
+    const fields = buildHealthExpenseFields(
+      intentWith({
+        category: { value: "supplies" },
+        cost: { value: "12" },
+        date: { value: "yesterday" },
+      }),
+    );
+    expect(fields.date).toBeUndefined();
+    expect(fields).toEqual({ category: "supplies", cost: 12 });
   });
 });

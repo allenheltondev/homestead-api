@@ -283,6 +283,86 @@ function speakDollars(amount) {
   return `$${value.toFixed(2)}`;
 }
 
+// Confirmation line after POST /health-expenses. Reads back the amount and the
+// category ("Got it. I recorded a 60 dollar vet expense.").
+export function renderHealthExpenseLogged(result) {
+  if (!result || typeof result !== "object") {
+    return "Got it. I recorded that health expense.";
+  }
+  const category = result.category ?? "health";
+  const cost = result.cost;
+  if (cost == null || !Number.isFinite(Number(cost))) {
+    return `Got it. I recorded a ${category} expense.`;
+  }
+  return `Got it. I recorded a ${speakMoney(Number(cost))} ${category} expense.`;
+}
+
+// Renders GET /stats/health into spoken English: total health spend over the
+// period, with an optional by-category breakdown when the API supplies one
+// ("You've spent 150 dollars on animal health this month: 90 dollars on vet,
+// 60 dollars on medicine.").
+export function renderHealthStats(stats) {
+  if (!stats || typeof stats !== "object") {
+    return "I couldn't read your health spending right now.";
+  }
+  const total = Number(stats.total ?? stats.spend ?? 0) || 0;
+  const periodLabel = stats.periodLabel ?? "this month";
+  if (!(total > 0)) {
+    return `You haven't spent anything on animal health ${periodLabel}.`;
+  }
+
+  let line = `You've spent ${speakMoney(total)} on animal health ${periodLabel}`;
+  const byCategory = Array.isArray(stats.byCategory) ? stats.byCategory : [];
+  const parts = byCategory
+    .filter((c) => c && Number(c.cost ?? c.spend) > 0)
+    .map(
+      (c) =>
+        `${speakMoney(Number(c.cost ?? c.spend))} on ${c.category ?? "other"}`,
+    );
+  if (parts.length) line += `: ${speakList(parts)}`;
+  return `${line}.`;
+}
+
+// Renders GET /stats/mortality: how many animals died over the period and the
+// loss rate as a percentage when supplied ("You lost 2 animals this year, a 4
+// percent loss rate.").
+export function renderMortality(stats) {
+  if (!stats || typeof stats !== "object") {
+    return "I couldn't read your mortality stats right now.";
+  }
+  const deaths = Number(stats.deaths ?? stats.count ?? 0) || 0;
+  const periodLabel = stats.periodLabel ?? "this year";
+  if (deaths === 0) {
+    return `You haven't lost any animals ${periodLabel}. That's great.`;
+  }
+
+  let line = `You lost ${pluralize(deaths, "animal")} ${periodLabel}`;
+  const rate = Number(stats.lossRate ?? stats.rate);
+  if (Number.isFinite(rate)) {
+    // Accept either a fraction (0.04) or an already-percentage value (4).
+    const pct = rate <= 1 ? rate * 100 : rate;
+    const rounded = Math.round(pct * 10) / 10;
+    line += `, a ${rounded} percent loss rate`;
+  }
+  return `${line}.`;
+}
+
+// Renders GET /stats/digest: speaks the API-supplied `lines` array as one
+// paragraph, with a friendly intro. Falls back gracefully when empty.
+export function renderDigest(digest) {
+  if (!digest || typeof digest !== "object") {
+    return "I couldn't put together your homestead digest right now.";
+  }
+  const lines = Array.isArray(digest.lines)
+    ? digest.lines.filter((l) => typeof l === "string" && l.trim())
+    : [];
+  if (lines.length === 0) {
+    return "There's nothing to report in your homestead digest yet.";
+  }
+  const intro = digest.title ?? "Here's your homestead digest";
+  return `${intro}. ${lines.map((l) => l.trim()).join(" ")}`;
+}
+
 export const __testables = {
   speakList,
   pluralize,

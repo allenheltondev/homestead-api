@@ -125,15 +125,30 @@ export function createApiClient(handlerInput) {
     getEggStats: (query) =>
       request(token, "GET", joinQuery("/stats/eggs", query)),
     // GET /stats/egg-cost — cost-per-dozen vs store price for an optional
-    // period.
+    // period and an optional flock (coop) filter.
     getEggCost: (query) =>
       request(token, "GET", joinQuery("/stats/egg-cost", query)),
+    // POST /health-expenses — record a vet/medicine/supplies expense.
+    recordHealthExpense: (fields) =>
+      request(token, "POST", "/health-expenses", fields),
+    // GET /stats/health — health-expense spend for an optional period.
+    getHealthStats: (query) =>
+      request(token, "GET", joinQuery("/stats/health", query)),
+    // GET /stats/mortality — loss/death stats for an optional period.
+    getMortality: (query) =>
+      request(token, "GET", joinQuery("/stats/mortality", query)),
+    // GET /stats/digest — weekly homestead digest (speakable `lines`).
+    getDigest: () => request(token, "GET", "/stats/digest"),
   };
 }
 
-// Appends a query string ({ period } only, when set) to a path.
+// Appends a query string to a path from the keys we support ({ period, flock }),
+// skipping any that aren't set. Returns the bare path when nothing applies.
 function joinQuery(path, query) {
-  if (!query || !query.period) return path;
-  const params = new URLSearchParams({ period: query.period });
-  return `${path}?${params.toString()}`;
+  if (!query) return path;
+  const params = new URLSearchParams();
+  if (query.period) params.set("period", query.period);
+  if (query.flock) params.set("flock", query.flock);
+  const qs = params.toString();
+  return qs ? `${path}?${qs}` : path;
 }
