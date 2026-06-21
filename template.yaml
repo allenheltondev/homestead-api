@@ -74,6 +74,14 @@ Parameters:
       minted for this client (Alexa account linking returns an access
       token, not an id token). Leave empty if the skill reuses the
       dashboard app client (UserPoolClientId).
+  StoreEggPricePerDozen:
+    Type: String
+    Default: "4.00"
+    Description: |
+      Default store price per dozen eggs used by the egg cost-per-dozen
+      analytics (GET /stats/egg-cost, /stats/summary). Surfaced to the API
+      Lambda as STORE_EGG_PRICE_PER_DOZEN; a per-request storePricePerDozen
+      query param overrides it.
 
 # Combined condition so partial-set (one param without the other) is a
 # no-op rather than a deploy error.
@@ -227,6 +235,11 @@ Resources:
     Properties:
       CodeUri: api
       Handler: index.handler
+      Environment:
+        Variables:
+          # Default store egg price per dozen for the cost-per-dozen
+          # analytics; a storePricePerDozen query param overrides it.
+          STORE_EGG_PRICE_PER_DOZEN: !Ref StoreEggPricePerDozen
       Policies:
         - AWSLambdaBasicExecutionRole
         - Version: 2012-10-17

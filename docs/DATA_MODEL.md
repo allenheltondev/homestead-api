@@ -31,6 +31,9 @@ UTC strings so string ordering on a sort key matches chronological order.
 | Lifecycle event         | `ANIMAL#<id>`       | `EVENT#<ts>`               | `EVENT#<TYPE>#<yyyy-mm>`     | `<ts>`                              | —        | —                                       |
 | Pasture                 | `PASTURE#<id>`      | `METADATA`                 | `PASTURE`                    | `<name>`                            | —        | —                                       |
 | Feed purchase           | `FEED#<yyyy-mm>`    | `PURCHASE#<ts>#<id>`       | `FEED#<type>`               | `<ts>`                              | —        | —                                       |
+| Feed purchase -> id pointer | `FEEDID#<id>`   | `POINTER`                  | —                            | —                                   | —        | —                                       |
+| Egg collection          | `EGG#<yyyy-mm>`     | `COLLECT#<ts>#<id>`        | —                            | —                                   | —        | —                                       |
+| Egg collection -> id pointer | `EGGID#<id>`   | `POINTER`                  | —                            | —                                   | —        | —                                       |
 
 ## Access pattern -> index map
 
@@ -48,6 +51,9 @@ UTC strings so string ordering on a sort key matches chronological order.
 | 10| List all pastures, alphabetical by name              | Query     | GSI1  | `gsi1pk = PASTURE` (sorted by `gsi1sk = <name>`)                           |
 | 11| List feed purchases for a month                      | Query     | table | `pk = FEED#<yyyy-mm>`, `begins_with(sk, "PURCHASE#")`                      |
 | 12| List feed purchases of a type (chronological)        | Query     | GSI1  | `gsi1pk = FEED#<type>` (range on `gsi1sk = <ts>`)                          |
+| 13| Resolve a feed purchase's key from its id (for DELETE) | GetItem | table | `pk = FEEDID#<id>`, `sk = POINTER`                                         |
+| 14| List egg collections for a month                     | Query     | table | `pk = EGG#<yyyy-mm>`, `begins_with(sk, "COLLECT#")` (or `sk BETWEEN` for a ts range) |
+| 15| Resolve an egg collection's key from its id (for DELETE) | GetItem | table | `pk = EGGID#<id>`, `sk = POINTER`                                          |
 
 ## Notes
 
@@ -59,6 +65,31 @@ UTC strings so string ordering on a sort key matches chronological order.
   gives per-animal history; GSI1 (pattern 8) gives the cross-animal
   "all <TYPE> events this month" report without a Scan.
 - Feed purchases partition by month (`FEED#<yyyy-mm>`) to keep partitions
-  bounded; GSI1 (`FEED#<type>`) supports the by-type rollup.
+  bounded; GSI1 (`FEED#<type>`) supports the by-type rollup. A separate
+  id-pointer item (`pk = FEEDID#<id>`, `sk = POINTER`, holding `targetPk` /
+  `targetSk`) lets `DELETE /feed-purchases/{id}` resolve the base-table key
+  from the bare id with a `GetItem` instead of a Scan.
+- **Feed purchase fields** come in two backward-compatible shapes:
+  - *bag shape* (`POST` with `bags`): stores `bags` (int >= 1),
+    `bagWeightLbs` (number > 0), `totalLbs = bags * bagWeightLbs`,
+    `feedType`, optional `cost` (default 0), and `purchasedAt`.
+  - *legacy shape*: stores `quantity`, `unit`, `cost`, `vendor`,
+    `purchasedAt`.
+  `feedType`/`type` is normalized to lower case, and the aliases
+  `chicken` / `layer` / `poultry` collapse to a single `poultry` type so
+  the cost-per-dozen analytics can sum poultry feed spend.
+- **Egg collections** partition by month (`EGG#<yyyy-mm>`); the sort key
+  `COLLECT#<ts>#<id>` (ts = `collectedAt` ISO) keeps a month's collections
+  chronological. Fields: `count` (int >= 1), `collectedAt` (ISO), optional
+  `coop`, `createdAt`. A range list fans out one `Query` per month
+  partition in the window (no Scan). Like feed purchases, an id-pointer item
+  (`pk = EGGID#<id>`, `sk = POINTER`) backs scan-free DELETE by bare id.
+- **Egg analytics** (`GET /stats/eggs`, `/stats/egg-cost`, and the egg
+  blocks of `/stats/summary`) are read-only aggregations: they `Query` the
+  egg month partitions (pattern 14) and the feed month partitions
+  (pattern 11) for the period and tally in memory. `costPerDozen` divides
+  poultry feed spend by dozens (null when there are no dozens); the store
+  comparison uses `STORE_EGG_PRICE_PER_DOZEN` (or a `storePricePerDozen`
+  query-param override). No Scans.
 - `expiresAt` is reserved for TTL on any ephemeral records (e.g.
   idempotency entries); permanent records omit it.

@@ -38,6 +38,9 @@ export function buildFeedPurchaseItem(fields) {
   const month = yyyymm(ts);
   const createdAt = nowIso();
 
+  // Optional fields (legacy quantity/unit/vendor vs. new bag fields) are
+  // dropped by the ddb marshaller when undefined, so a row only carries the
+  // attributes its payload shape set.
   return {
     ...feedKey(month, ts, id),
     gsi1pk: `FEED#${fields.type}`,
@@ -45,6 +48,10 @@ export function buildFeedPurchaseItem(fields) {
     entity: "FeedPurchase",
     id,
     type: fields.type,
+    feedType: fields.feedType,
+    bags: fields.bags,
+    bagWeightLbs: fields.bagWeightLbs,
+    totalLbs: fields.totalLbs,
     quantity: fields.quantity,
     unit: fields.unit,
     cost: fields.cost,

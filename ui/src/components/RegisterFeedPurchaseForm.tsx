@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { useState } from 'react';
-import { FEED_UNITS, type CreateFeedPurchaseRequest, type FeedUnit } from '../api/types';
+import type { CreateFeedPurchaseRequest } from '../api/types';
 
 interface Props {
   busy: boolean;
@@ -11,25 +11,24 @@ interface Props {
 }
 
 interface FormState {
-  type: string;
-  quantity: string;
-  unit: FeedUnit;
+  feedType: string;
+  bags: string;
+  bagWeightLbs: string;
   cost: string;
-  vendor: string;
-  purchasedAt: string;
+  date: string;
 }
 
 const EMPTY: FormState = {
-  type: '',
-  quantity: '',
-  unit: 'lb',
+  feedType: '',
+  bags: '',
+  bagWeightLbs: '',
   cost: '',
-  vendor: '',
-  purchasedAt: '',
+  date: '',
 };
 
-// Records a feed purchase. type/quantity/unit/cost/vendor are required;
-// purchasedAt defaults server-side to now when left blank.
+// Records a feed-by-the-bag purchase. feedType/bags/bagWeightLbs are required;
+// the server computes total lbs (bags * bagWeightLbs). cost and date are
+// optional — date defaults server-side to today when left blank.
 export default function RegisterFeedPurchaseForm({
   busy,
   serverError,
@@ -44,96 +43,86 @@ export default function RegisterFeedPurchaseForm({
     setForm((f) => ({ ...f, [key]: value }));
   };
 
+  const bagsNum = Number(form.bags);
+  const bagWeightNum = Number(form.bagWeightLbs);
+  const totalLbs =
+    Number.isFinite(bagsNum) && Number.isFinite(bagWeightNum) && bagsNum > 0 && bagWeightNum > 0
+      ? bagsNum * bagWeightNum
+      : null;
+
   const submit = (): void => {
     setValidationError(null);
-    const type = form.type.trim();
-    const vendor = form.vendor.trim();
-    const quantity = Number(form.quantity);
-    const cost = Number(form.cost);
+    const feedType = form.feedType.trim();
 
-    if (type.length === 0) {
+    if (feedType.length === 0) {
       setValidationError('Feed type is required.');
       return;
     }
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      setValidationError('Quantity must be a positive number.');
+    if (!Number.isFinite(bagsNum) || bagsNum <= 0) {
+      setValidationError('Bags must be a positive number.');
       return;
     }
-    if (!Number.isFinite(cost) || cost < 0) {
+    if (!Number.isFinite(bagWeightNum) || bagWeightNum <= 0) {
+      setValidationError('Bag weight must be a positive number.');
+      return;
+    }
+
+    const cost = Number(form.cost);
+    if (form.cost.trim().length > 0 && (!Number.isFinite(cost) || cost < 0)) {
       setValidationError('Cost must be a non-negative number.');
-      return;
-    }
-    if (vendor.length === 0) {
-      setValidationError('Vendor is required.');
       return;
     }
 
     const payload: CreateFeedPurchaseRequest = {
-      type,
-      quantity,
-      unit: form.unit,
-      cost,
-      vendor,
+      feedType,
+      bags: bagsNum,
+      bagWeightLbs: bagWeightNum,
     };
-    if (form.purchasedAt) payload.purchasedAt = form.purchasedAt;
+    if (form.cost.trim().length > 0) payload.cost = cost;
+    if (form.date) payload.date = form.date;
 
     onSubmit(payload);
   };
 
   return (
     <div className="card card-body space-y-3 max-w-2xl">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <label className="block">
-          <span className="field-label">Feed type</span>
-          <input
-            type="text"
-            className="input"
-            value={form.type}
-            onChange={(e) => update('type', e.target.value)}
-            placeholder="hay, grain, mineral, ..."
-            disabled={busy}
-            autoFocus
-          />
-        </label>
-        <label className="block">
-          <span className="field-label">Vendor</span>
-          <input
-            type="text"
-            className="input"
-            value={form.vendor}
-            onChange={(e) => update('vendor', e.target.value)}
-            disabled={busy}
-          />
-        </label>
-      </div>
+      <label className="block">
+        <span className="field-label">Feed type</span>
+        <input
+          type="text"
+          className="input"
+          value={form.feedType}
+          onChange={(e) => update('feedType', e.target.value)}
+          placeholder="layer pellets, scratch, ..."
+          disabled={busy}
+          autoFocus
+        />
+      </label>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <label className="block">
-          <span className="field-label">Quantity</span>
+          <span className="field-label">Bags</span>
           <input
             type="number"
             min="0"
             step="any"
             className="input"
-            value={form.quantity}
-            onChange={(e) => update('quantity', e.target.value)}
+            value={form.bags}
+            onChange={(e) => update('bags', e.target.value)}
             disabled={busy}
           />
         </label>
         <label className="block">
-          <span className="field-label">Unit</span>
-          <select
+          <span className="field-label">Bag weight (lb)</span>
+          <input
+            type="number"
+            min="0"
+            step="any"
             className="input"
-            value={form.unit}
-            onChange={(e) => update('unit', e.target.value as FeedUnit)}
+            value={form.bagWeightLbs}
+            onChange={(e) => update('bagWeightLbs', e.target.value)}
             disabled={busy}
-          >
-            {FEED_UNITS.map((u) => (
-              <option key={u} value={u}>
-                {u}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <label className="block">
           <span className="field-label">Cost (USD)</span>
@@ -146,7 +135,15 @@ export default function RegisterFeedPurchaseForm({
             onChange={(e) => update('cost', e.target.value)}
             disabled={busy}
           />
+          <span className="field-hint mt-1 block">Optional.</span>
         </label>
+      </div>
+
+      <div className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+        Total feed:{' '}
+        <span className="font-medium text-foreground">
+          {totalLbs === null ? '—' : `${totalLbs.toLocaleString()} lb`}
+        </span>
       </div>
 
       <label className="block">
@@ -154,8 +151,8 @@ export default function RegisterFeedPurchaseForm({
         <input
           type="date"
           className="input"
-          value={form.purchasedAt}
-          onChange={(e) => update('purchasedAt', e.target.value)}
+          value={form.date}
+          onChange={(e) => update('date', e.target.value)}
           disabled={busy}
         />
         <span className="field-hint mt-1 block">Defaults to today if left blank.</span>
