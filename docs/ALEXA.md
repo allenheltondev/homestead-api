@@ -152,3 +152,38 @@ app client id at deploy time via the `AlexaUserPoolClientId` template
 parameter (CI/deploy var `ALEXA_USER_POOL_CLIENT_ID`) so access tokens
 minted for the Alexa client pass `client_id` validation. If the Alexa
 skill reuses the dashboard app client, no extra config is needed.
+
+## Echo Show visuals (APL)
+
+On screen devices (Echo Show, Fire TV) the skill renders **APL** documents
+alongside the spoken response; on headless Echo devices it stays voice-only.
+The render path is gated on `Alexa.Presentation.APL` device support
+(`alexa/lib/apl.mjs`), so nothing changes for audio-only devices.
+
+Screens (`alexa/apl/documents.mjs`):
+- **Home** (LaunchRequest) — title + spoken-command hints.
+- **Herd summary** (GetHerdSummaryIntent) — total, per-species counts, and a
+  births / deaths / feed-spend footer.
+- **Herd count** (GetHerdCountIntent) — total, per-species counts, active +
+  species footer (reuses the herd layout).
+- **Confirmation** (RecordBirth / RecordFeedPurchase) — checkmark + message.
+
+### Enable APL in the skill manifest
+APL only renders if the skill declares the interface. In the skill package
+manifest (`skill.json`):
+
+```json
+{
+  "manifest": {
+    "apis": {
+      "custom": {
+        "interfaces": [{ "type": "ALEXA_PRESENTATION_APL" }]
+      }
+    }
+  }
+}
+```
+
+Preview/iterate on the documents in the **APL authoring tool**
+(developer.amazon.com → Alexa → APL) by pasting a document from
+`alexa/apl/documents.mjs` with a sample datasource.

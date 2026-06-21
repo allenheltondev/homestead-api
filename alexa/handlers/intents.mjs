@@ -15,6 +15,12 @@ import {
   renderFeedConfirmation,
 } from "../lib/speech.mjs";
 import { buildBirthFields, buildFeedFields } from "../lib/slots.mjs";
+import {
+  addHomeScreen,
+  addHerdSummaryScreen,
+  addHerdCountScreen,
+  addConfirmationScreen,
+} from "../lib/apl.mjs";
 
 const SKILL_NAME = "Homestead";
 const HELP_TEXT =
@@ -55,7 +61,7 @@ export const LaunchRequestHandler = {
     return handlerInput.requestEnvelope.request.type === "LaunchRequest";
   },
   handle(handlerInput) {
-    return handlerInput.responseBuilder
+    return addHomeScreen(handlerInput)
       .speak(`Welcome to ${SKILL_NAME}. ${HELP_TEXT}`)
       .reprompt(HELP_TEXT)
       .getResponse();
@@ -70,7 +76,7 @@ export const GetHerdSummaryIntentHandler = {
     try {
       const api = createApiClient(handlerInput);
       const summary = await api.getSummary();
-      return handlerInput.responseBuilder
+      return addHerdSummaryScreen(handlerInput, summary)
         .speak(renderSummary(summary))
         .getResponse();
     } catch (err) {
@@ -91,7 +97,7 @@ export const GetHerdCountIntentHandler = {
     try {
       const api = createApiClient(handlerInput);
       const herd = await api.getHerd();
-      return handlerInput.responseBuilder
+      return addHerdCountScreen(handlerInput, herd)
         .speak(renderHerdCount(herd))
         .getResponse();
     } catch (err) {
@@ -121,8 +127,9 @@ export const RecordBirthIntentHandler = {
     try {
       const api = createApiClient(handlerInput);
       const result = await api.recordBirth(built.fields);
-      return handlerInput.responseBuilder
-        .speak(renderBirthConfirmation(result))
+      const text = renderBirthConfirmation(result);
+      return addConfirmationScreen(handlerInput, "Birth recorded", text)
+        .speak(text)
         .getResponse();
     } catch (err) {
       return speakApiError(
@@ -151,8 +158,9 @@ export const RecordFeedPurchaseIntentHandler = {
     try {
       const api = createApiClient(handlerInput);
       const purchase = await api.recordFeedPurchase(built.fields);
-      return handlerInput.responseBuilder
-        .speak(renderFeedConfirmation(purchase))
+      const text = renderFeedConfirmation(purchase);
+      return addConfirmationScreen(handlerInput, "Feed purchase recorded", text)
+        .speak(text)
         .getResponse();
     } catch (err) {
       return speakApiError(
