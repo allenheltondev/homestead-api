@@ -1,0 +1,5 @@
+# W1100 flags YAML merge keys (<<: *esbuild-properties) used to DRY the
+# per-function esbuild BuildProperties. SAM resolves them at package/build
+# time, so the warning is a false positive for our deploy path.
+ignore_checks:
+  - W1100

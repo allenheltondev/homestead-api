@@ -55,7 +55,7 @@ jobs:
         # alexa/node_modules, so install them before sam build.
         run: cd alexa && npm ci --ignore-scripts
 
-      - name: Set up Python (for SAM CLI)
+      - name: Set up Python (for SAM CLI + cfn-lint)
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -65,8 +65,10 @@ jobs:
         with:
           use-installer: true
 
-      - name: SAM validate (cfn-lint, no AWS credentials needed)
-        run: sam validate --lint --region us-east-1
+      - name: Lint template (cfn-lint; honors .cfnlintrc, no AWS creds)
+        run: |
+          pip install cfn-lint
+          cfn-lint template.yaml
 
       - name: SAM build
         run: sam build --parallel
