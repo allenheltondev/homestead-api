@@ -1,0 +1,40 @@
+name: Alexa CI
+
+on:
+  pull_request:
+    paths:
+      - "alexa/**"
+      - ".github/workflows/alexa-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "alexa/**"
+      - ".github/workflows/alexa-ci.yml"
+
+concurrency:
+  group: alexa-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Alexa Lint & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: alexa/package-lock.json
+
+      - name: Install dependencies
+        working-directory: alexa
+        run: npm ci
+
+      - name: Test
+        working-directory: alexa
+        run: npm test
