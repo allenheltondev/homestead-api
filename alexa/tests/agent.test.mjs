@@ -66,7 +66,6 @@ const apiClient = {
   completeCareTask: jest.fn(),
   recordHarvest: jest.fn(),
   getGardenStats: jest.fn(),
-  getPlantingCalendar: jest.fn(),
   publishSurplus: jest.fn(),
   getGrnListings: jest.fn(),
   getGrnRequests: jest.fn(),

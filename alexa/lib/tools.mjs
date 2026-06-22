@@ -202,14 +202,6 @@ export const TOOL_SPECS = [
   },
   {
     toolSpec: {
-      name: "get_planting_calendar",
-      description:
-        "Get the planting and sowing calendar: what to plant, sow, or transplant and when.",
-      inputSchema: { json: { type: "object", properties: {}, required: [] } },
-    },
-  },
-  {
-    toolSpec: {
       name: "get_grn_listings",
       description:
         "Get the member's surplus listings on the Good Roots Network, including whether each listing has been claimed and by whom. Use for 'did anyone claim my produce' questions.",
@@ -566,11 +558,6 @@ export const REGISTRY = {
     kind: "read",
     run: (args, api) => api.getGardenStats(pickPeriod(args)),
     describe: () => "Get garden stats",
-  },
-  get_planting_calendar: {
-    kind: "read",
-    run: (_args, api) => api.getPlantingCalendar(),
-    describe: () => "Get the planting calendar",
   },
   get_grn_listings: {
     kind: "read",
