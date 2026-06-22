@@ -122,6 +122,74 @@ export const TOOL_SPECS = [
       inputSchema: { json: { type: "object", properties: {}, required: [] } },
     },
   },
+  {
+    toolSpec: {
+      name: "get_milk_stats",
+      description:
+        "Get milk production stats (total volume and per-day rate) for an optional period.",
+      inputSchema: {
+        json: { type: "object", properties: { ...periodProperty }, required: [] },
+      },
+    },
+  },
+  {
+    toolSpec: {
+      name: "get_milk_cost",
+      description:
+        "Get the cost per gallon of milk compared to the store price, for an optional period.",
+      inputSchema: {
+        json: { type: "object", properties: { ...periodProperty }, required: [] },
+      },
+    },
+  },
+  {
+    toolSpec: {
+      name: "get_care_due",
+      description:
+        "Get the animal care tasks coming due soon (deworming, hoof trims, vaccinations, etc.), optionally within a number of days.",
+      inputSchema: {
+        json: {
+          type: "object",
+          properties: {
+            withinDays: {
+              type: "number",
+              description: "Optional window in days to look ahead for due tasks.",
+            },
+          },
+          required: [],
+        },
+      },
+    },
+  },
+  {
+    toolSpec: {
+      name: "get_upcoming_due",
+      description:
+        "Get what's due to hatch or give birth soon: upcoming kiddings/calvings/etc. and incubation hatches. Optionally within a number of days.",
+      inputSchema: {
+        json: {
+          type: "object",
+          properties: {
+            withinDays: {
+              type: "number",
+              description: "Optional window in days to look ahead.",
+            },
+          },
+          required: [],
+        },
+      },
+    },
+  },
+  {
+    toolSpec: {
+      name: "get_pnl",
+      description:
+        "Get the homestead profit and loss (income, expenses, and net) for an optional period. Use this for 'am I in the black' or 'homestead profit' questions.",
+      inputSchema: {
+        json: { type: "object", properties: { ...periodProperty }, required: [] },
+      },
+    },
+  },
 
   // --- WRITE tools (confirm-gated; never executed inline) -----------------
   {
@@ -265,6 +333,49 @@ export const TOOL_SPECS = [
       },
     },
   },
+  {
+    toolSpec: {
+      name: "log_milk",
+      description:
+        "Log a milking. Provide the volume and unit (gallons, quarts, liters), and optionally which animal it came from.",
+      inputSchema: {
+        json: {
+          type: "object",
+          properties: {
+            volume: { type: "number", description: "Volume of milk collected." },
+            unit: {
+              type: "string",
+              description: "Volume unit (gallon, quart, pint, liter, ounce, cup).",
+            },
+            animal: {
+              type: "string",
+              description: "Optional animal the milk came from (e.g. Daisy).",
+            },
+          },
+          required: ["volume"],
+        },
+      },
+    },
+  },
+  {
+    toolSpec: {
+      name: "complete_care_task",
+      description:
+        "Mark an animal care task complete. Provide the task name or id (e.g. 'deworm the goats').",
+      inputSchema: {
+        json: {
+          type: "object",
+          properties: {
+            task: {
+              type: "string",
+              description: "The care task name or id to mark complete.",
+            },
+          },
+          required: ["task"],
+        },
+      },
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -336,6 +447,31 @@ export const REGISTRY = {
     run: (_args, api) => api.getDigest(),
     describe: () => "Get the weekly digest",
   },
+  get_milk_stats: {
+    kind: "read",
+    run: (args, api) => api.getMilkStats(pickPeriod(args)),
+    describe: () => "Get milk stats",
+  },
+  get_milk_cost: {
+    kind: "read",
+    run: (args, api) => api.getMilkCost(pickPeriod(args)),
+    describe: () => "Get milk cost",
+  },
+  get_care_due: {
+    kind: "read",
+    run: (args, api) => api.getCareDue(pickWithinDays(args)),
+    describe: () => "Get care tasks due",
+  },
+  get_upcoming_due: {
+    kind: "read",
+    run: (args, api) => api.getUpcomingDue(pickWithinDays(args)),
+    describe: () => "Get what's due to hatch or give birth",
+  },
+  get_pnl: {
+    kind: "read",
+    run: (args, api) => api.getPnl(pickPeriod(args)),
+    describe: () => "Get profit and loss",
+  },
 
   // --- WRITE -------------------------------------------------------------
   log_feed_purchase: {
@@ -389,6 +525,24 @@ export const REGISTRY = {
         ? `Record a ${cost} ${category} expense`
         : `Record a ${category} expense`;
     },
+  },
+  log_milk: {
+    kind: "write",
+    run: (args, api) => api.recordMilk(cleanMilk(args)),
+    describe: (args) => {
+      const volume = args?.volume;
+      const unit = args?.unit ?? "gallon";
+      const from = args?.animal ? ` from ${args.animal}` : "";
+      return volume != null
+        ? `Log ${plural(volume, unit)} of milk${from}`
+        : `Log a milking${from}`;
+    },
+  },
+  complete_care_task: {
+    kind: "write",
+    run: (args, api) => api.completeCareTask(textOrUndefined(args?.task)),
+    describe: (args) =>
+      `Mark ${args?.task ?? "that care task"} complete`,
   },
 };
 
@@ -482,6 +636,26 @@ function cleanMove(args) {
   return fields;
 }
 
+// Returns a positive-integer day window, or undefined so the API uses its
+// default look-ahead.
+function pickWithinDays(args) {
+  const n = numberOrUndefined(args?.withinDays);
+  return n != null && n > 0 ? Math.round(n) : undefined;
+}
+
+function cleanMilk(args) {
+  const fields = {};
+  const volume = numberOrUndefined(args?.volume);
+  const unit = textOrUndefined(args?.unit);
+  const animal = textOrUndefined(args?.animal);
+  if (volume != null) {
+    fields.volume = volume;
+    fields.unit = unit ?? "gal";
+  }
+  if (animal) fields.animal = animal;
+  return fields;
+}
+
 function cleanHealthExpense(args) {
   const fields = {};
   const category = textOrUndefined(args?.category);
@@ -499,4 +673,6 @@ export const __testables = {
   cleanFeedPurchase,
   cleanBirth,
   cleanDeath,
+  pickWithinDays,
+  cleanMilk,
 };

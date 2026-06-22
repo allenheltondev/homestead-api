@@ -9,6 +9,9 @@ import {
   buildEggCostQuery,
   buildFeedUsageFields,
   buildHealthExpenseFields,
+  buildMilkFields,
+  buildWithinDays,
+  buildCareTaskRef,
   __testables,
 } from "../lib/slots.mjs";
 
@@ -48,6 +51,17 @@ describe("normalizeUnit", () => {
   });
   test("returns undefined for unknown units", () => {
     expect(__testables.normalizeUnit("scoops")).toBeUndefined();
+  });
+});
+
+describe("normalizeMilkUnit", () => {
+  test("maps spoken volume units to canonical tokens", () => {
+    expect(__testables.normalizeMilkUnit("gallons")).toBe("gal");
+    expect(__testables.normalizeMilkUnit("Quart")).toBe("qt");
+    expect(__testables.normalizeMilkUnit("liters")).toBe("l");
+  });
+  test("returns undefined for unknown units", () => {
+    expect(__testables.normalizeMilkUnit("scoops")).toBeUndefined();
   });
 });
 
@@ -315,5 +329,69 @@ describe("buildHealthExpenseFields", () => {
     );
     expect(fields.date).toBeUndefined();
     expect(fields).toEqual({ category: "supplies", cost: 12 });
+  });
+});
+
+describe("buildMilkFields", () => {
+  test("defaults to gallons when no unit is given", () => {
+    const fields = buildMilkFields(
+      intentWith({
+        volume: { value: "2" },
+        animal: { value: "Daisy" },
+        date: { value: "2026-06-21" },
+      }),
+    );
+    expect(fields).toEqual({
+      volume: 2,
+      unit: "gal",
+      animal: "Daisy",
+      date: "2026-06-21",
+    });
+  });
+
+  test("normalizes the spoken unit", () => {
+    const fields = buildMilkFields(
+      intentWith({ volume: { value: "4" }, unit: { value: "quarts" } }),
+    );
+    expect(fields).toEqual({ volume: 4, unit: "qt" });
+  });
+
+  test("omits volume + unit when no volume is given", () => {
+    expect(
+      buildMilkFields(intentWith({ animal: { value: "Daisy" } })),
+    ).toEqual({ animal: "Daisy" });
+  });
+
+  test("drops an invalid date", () => {
+    const fields = buildMilkFields(
+      intentWith({ volume: { value: "3" }, date: { value: "tomorrow" } }),
+    );
+    expect(fields).toEqual({ volume: 3, unit: "gal" });
+  });
+});
+
+describe("buildWithinDays", () => {
+  test("returns a positive integer when present", () => {
+    expect(buildWithinDays(intentWith({ withinDays: { value: "7" } }))).toBe(7);
+  });
+  test("undefined when absent or non-positive", () => {
+    expect(buildWithinDays(intentWith({}))).toBeUndefined();
+    expect(
+      buildWithinDays(intentWith({ withinDays: { value: "0" } })),
+    ).toBeUndefined();
+    expect(
+      buildWithinDays(intentWith({ withinDays: { value: "soon" } })),
+    ).toBeUndefined();
+  });
+});
+
+describe("buildCareTaskRef", () => {
+  test("returns the trimmed task slot", () => {
+    expect(
+      buildCareTaskRef(intentWith({ task: { value: "deworm the goats" } })),
+    ).toBe("deworm the goats");
+  });
+  test("undefined when absent", () => {
+    expect(buildCareTaskRef(intentWith({}))).toBeUndefined();
   });
 });

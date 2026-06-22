@@ -139,6 +139,73 @@ export function createApiClient(handlerInput) {
       request(token, "GET", joinQuery("/stats/mortality", query)),
     // GET /stats/digest — weekly homestead digest (speakable `lines`).
     getDigest: () => request(token, "GET", "/stats/digest"),
+
+    // --- Species-smart animals: milk logging + stats ---------------------
+    // POST /milk-logs — log a milking (volume + unit, optional animal/date).
+    recordMilk: (fields) => request(token, "POST", "/milk-logs", fields),
+    // GET /stats/milk — milk production stats for an optional period.
+    getMilkStats: (query) =>
+      request(token, "GET", joinQuery("/stats/milk", query)),
+    // GET /stats/milk-cost — cost-per-gallon (or per-unit) vs store price for
+    // an optional period.
+    getMilkCost: (query) =>
+      request(token, "GET", joinQuery("/stats/milk-cost", query)),
+
+    // --- Care schedules --------------------------------------------------
+    // GET /care-tasks — the full list of care tasks (optionally filtered).
+    getCareTasks: (query) =>
+      request(token, "GET", joinQuery("/care-tasks", query)),
+    // GET /stats/care/due — care tasks coming due within N days (default
+    // window decided by the server when withinDays is omitted).
+    getCareDue: (withinDays) =>
+      request(
+        token,
+        "GET",
+        withinDays != null
+          ? `/stats/care/due?withinDays=${encodeURIComponent(withinDays)}`
+          : "/stats/care/due",
+      ),
+    // POST /care-tasks/{id}/complete — mark a care task complete.
+    completeCareTask: (id) =>
+      request(
+        token,
+        "POST",
+        `/care-tasks/${encodeURIComponent(id)}/complete`,
+      ),
+
+    // --- Breeding / incubation upcoming ----------------------------------
+    // GET /stats/breeding/upcoming — kiddings/calvings/etc. coming due within
+    // N days. GET /stats/incubation — hatches in progress. getUpcomingDue
+    // fans out to both and returns a merged shape the speech layer renders.
+    getBreedingUpcoming: (withinDays) =>
+      request(
+        token,
+        "GET",
+        withinDays != null
+          ? `/stats/breeding/upcoming?withinDays=${encodeURIComponent(withinDays)}`
+          : "/stats/breeding/upcoming",
+      ),
+    getIncubation: () => request(token, "GET", "/stats/incubation"),
+    // Combined "what's due to hatch or kid" rollup. Resolves both calls and
+    // returns { breeding, incubation }; either may be null if its call fails.
+    getUpcomingDue: async (withinDays) => {
+      const [breeding, incubation] = await Promise.all([
+        request(
+          token,
+          "GET",
+          withinDays != null
+            ? `/stats/breeding/upcoming?withinDays=${encodeURIComponent(withinDays)}`
+            : "/stats/breeding/upcoming",
+        ),
+        request(token, "GET", "/stats/incubation"),
+      ]);
+      return { breeding, incubation };
+    },
+
+    // --- Homestead P&L ---------------------------------------------------
+    // GET /stats/pnl — profit-and-loss (income, expenses, net) for an
+    // optional period.
+    getPnl: (query) => request(token, "GET", joinQuery("/stats/pnl", query)),
   };
 }
 
@@ -149,6 +216,7 @@ function joinQuery(path, query) {
   const params = new URLSearchParams();
   if (query.period) params.set("period", query.period);
   if (query.flock) params.set("flock", query.flock);
+  if (query.withinDays != null) params.set("withinDays", query.withinDays);
   const qs = params.toString();
   return qs ? `${path}?${qs}` : path;
 }

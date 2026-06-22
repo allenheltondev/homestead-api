@@ -12,6 +12,11 @@ import {
   renderHealthStats,
   renderMortality,
   renderDigest,
+  renderMilkLogged,
+  renderMilkStats,
+  renderCareDue,
+  renderUpcomingDue,
+  renderPnl,
   __testables,
 } from "../lib/speech.mjs";
 
@@ -353,5 +358,121 @@ describe("renderDigest", () => {
 
   test("null payload", () => {
     expect(renderDigest(null)).toMatch(/couldn't put together/);
+  });
+});
+
+describe("renderMilkLogged", () => {
+  test("speaks volume, unit, and animal", () => {
+    expect(
+      renderMilkLogged({ volume: 2, unit: "gal", animal: "Daisy" }),
+    ).toBe("Got it. I logged 2 gallons of milk from Daisy.");
+  });
+  test("singular volume and no animal", () => {
+    expect(renderMilkLogged({ volume: 1, unit: "qt" })).toBe(
+      "Got it. I logged 1 quart of milk.",
+    );
+  });
+  test("falls back without a volume", () => {
+    expect(renderMilkLogged({})).toMatch(/logged that milking/);
+    expect(renderMilkLogged(null)).toMatch(/logged that milking/);
+  });
+});
+
+describe("renderMilkStats", () => {
+  test("speaks total and per-day rate", () => {
+    const speech = renderMilkStats({
+      total: 14,
+      unit: "gal",
+      perDay: 0.5,
+      periodLabel: "this month",
+    });
+    expect(speech).toContain("14 gallons of milk this month");
+    expect(speech).toContain("a day");
+  });
+  test("appends a store comparison when cost is present", () => {
+    const speech = renderMilkStats({
+      total: 10,
+      costPerGallon: 3,
+      storePricePerGallon: 5,
+    });
+    expect(speech).toContain("cheaper than the $5 store price");
+  });
+  test("nothing collected", () => {
+    expect(renderMilkStats({ total: 0 })).toMatch(/haven't collected any milk/);
+  });
+  test("null payload", () => {
+    expect(renderMilkStats(null)).toMatch(/couldn't read your milk stats/);
+  });
+});
+
+describe("renderCareDue", () => {
+  test("lists tasks with due dates", () => {
+    const speech = renderCareDue({
+      tasks: [
+        { name: "deworm the goats", dueDate: "2026-06-26" },
+        { name: "trim hooves", dueDate: "2026-06-27" },
+      ],
+    });
+    expect(speech).toContain("2 care tasks coming due");
+    expect(speech).toContain("deworm the goats on");
+  });
+  test("summarizes the overflow beyond three", () => {
+    const speech = renderCareDue({
+      tasks: [
+        { name: "a" },
+        { name: "b" },
+        { name: "c" },
+        { name: "d" },
+        { name: "e" },
+      ],
+    });
+    expect(speech).toContain("2 other tasks");
+  });
+  test("nothing due", () => {
+    expect(renderCareDue({ tasks: [] })).toMatch(/don't have any care tasks/);
+  });
+  test("null payload", () => {
+    expect(renderCareDue(null)).toMatch(/couldn't read your care schedule/);
+  });
+});
+
+describe("renderUpcomingDue", () => {
+  test("speaks births and hatches", () => {
+    const speech = renderUpcomingDue({
+      breeding: { upcoming: [{ dam: "Daisy", event: "kidding", dueDate: "2026-07-01" }] },
+      incubation: { batches: [{ species: "chicken", eggCount: 12, hatchDate: "2026-06-30" }] },
+    });
+    expect(speech).toContain("Daisy");
+    expect(speech).toContain("In the incubator");
+    expect(speech).toContain("chicken egg");
+  });
+  test("nothing due", () => {
+    expect(
+      renderUpcomingDue({ breeding: { upcoming: [] }, incubation: { batches: [] } }),
+    ).toMatch(/Nothing is due/);
+  });
+  test("null payload", () => {
+    expect(renderUpcomingDue(null)).toMatch(/couldn't check what's coming due/);
+  });
+});
+
+describe("renderPnl", () => {
+  test("in the black", () => {
+    expect(
+      renderPnl({ income: 400, expenses: 250, net: 150, periodLabel: "this month" }),
+    ).toBe(
+      "This month you brought in 400 dollars and spent 250 dollars, so you're in the black by 150 dollars.",
+    );
+  });
+  test("in the red", () => {
+    expect(renderPnl({ income: 100, expenses: 250 })).toContain(
+      "in the red by 150 dollars",
+    );
+  });
+  test("broke even", () => {
+    expect(renderPnl({ income: 100, expenses: 100 })).toContain("broke even");
+  });
+  test("null payload", () => {
+    expect(renderPnl(null)).toMatch(/couldn't read your profit and loss/);
   });
 });
