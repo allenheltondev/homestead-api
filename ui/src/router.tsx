@@ -20,6 +20,7 @@ import Pnl from './routes/Pnl';
 import Garden from './routes/Garden';
 import Beds from './routes/Beds';
 import GoodRoots from './routes/GoodRoots';
+import Copilot from './routes/Copilot';
 
 export const router = createBrowserRouter([
   {
@@ -58,6 +59,7 @@ export const router = createBrowserRouter([
       { path: 'beds', element: <Beds /> },
       { path: 'good-roots', element: <GoodRoots /> },
       { path: 'pnl', element: <Pnl /> },
+      { path: 'copilot', element: <Copilot /> },
     ],
   },
 ]);
