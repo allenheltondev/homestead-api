@@ -11,10 +11,15 @@ import type {
   GrnClaim,
   GrnDiscoverFilters,
   GrnDiscoverResponse,
+  GrnListing,
   GrnListingsResponse,
   GrnRequestsResponse,
   GrowerCrop,
   GrowerCropListResponse,
+  HarvestItem,
+  HarvestLogResponse,
+  PublishCropSurplusRequest,
+  RecordCropHarvestRequest,
   UpdateBedRequest,
   UpdateGrowerCropRequest,
 } from './types';
@@ -105,6 +110,45 @@ export async function updateGrowerCrop(
 
 export async function deleteGrowerCrop(apiFetch: ApiFetch, id: string): Promise<void> {
   await apiFetch<void>(`/grn/crops/${id}`, { method: 'DELETE' });
+}
+
+// --- Per-crop harvests -------------------------------------------------
+// Harvests are recorded against a Good Roots crop (GET/POST only — GRN does
+// not support editing or deleting individual harvests).
+
+// GET /grn/crops/{cropLibraryId}/harvests — the crop's GRN harvest log plus a
+// running total and harvest count.
+export async function getCropHarvests(
+  apiFetch: ApiFetch,
+  cropLibraryId: string,
+): Promise<HarvestLogResponse> {
+  return apiFetch<HarvestLogResponse>(`/grn/crops/${cropLibraryId}/harvests`);
+}
+
+// POST /grn/crops/{cropLibraryId}/harvests — record a harvest. amount is
+// required (> 0); unit/harvestedOn/notes are optional.
+export async function recordCropHarvest(
+  apiFetch: ApiFetch,
+  cropLibraryId: string,
+  body: RecordCropHarvestRequest,
+): Promise<HarvestItem> {
+  return apiFetch<HarvestItem>(`/grn/crops/${cropLibraryId}/harvests`, {
+    method: 'POST',
+    body,
+  });
+}
+
+// POST /grn/crops/{cropLibraryId}/publish-surplus — share a crop's surplus to
+// the Good Roots community. Returns the created listing.
+export async function publishCropSurplus(
+  apiFetch: ApiFetch,
+  cropLibraryId: string,
+  body: PublishCropSurplusRequest = {},
+): Promise<GrnListing> {
+  return apiFetch<GrnListing>(`/grn/crops/${cropLibraryId}/publish-surplus`, {
+    method: 'POST',
+    body,
+  });
 }
 
 // --- Shared catalog ----------------------------------------------------

@@ -1,240 +1,155 @@
 import type { ReactElement } from 'react';
 import { useState } from 'react';
-import type { Bed, CreateHarvestLogRequest, GrowerCrop } from '../api/types';
+import type { GrowerCrop, RecordCropHarvestRequest } from '../api/types';
 
 interface Props {
   busy: boolean;
   serverError: string | null;
-  beds?: Bed[];
-  crops?: GrowerCrop[];
+  crops: GrowerCrop[];
+  // Pre-selected crop-library id (e.g. when logging from a crop's harvest view).
+  initialCropLibraryId?: string;
   submitLabel?: string;
-  onSubmit: (payload: CreateHarvestLogRequest) => void;
+  onSubmit: (cropLibraryId: string, payload: RecordCropHarvestRequest) => void;
   onCancel: () => void;
 }
 
 interface FormState {
-  // Selected Good Roots crop-library id, '' when entering a custom crop.
+  // Selected Good Roots crop-library id the harvest is recorded against.
   cropLibraryId: string;
-  crop: string;
-  quantity: string;
+  amount: string;
   unit: string;
-  date: string;
-  bedId: string;
-  cost: string;
-  note: string;
+  harvestedOn: string;
+  notes: string;
 }
-
-const EMPTY: FormState = {
-  cropLibraryId: '',
-  crop: '',
-  quantity: '',
-  unit: 'lb',
-  date: '',
-  bedId: '',
-  cost: '',
-  note: '',
-};
 
 // Builds the display name for a crop-library entry (crop · variety).
 function cropLabel(c: GrowerCrop): string {
   return c.variety ? `${c.name} · ${c.variety}` : c.name;
 }
 
-// Logs a garden harvest. Crop is chosen from the Good Roots crop library (which
-// stores cropLibraryId + cropName) with a free-text fallback when GRN is
-// unconfigured. quantity is required; unit defaults to lb; date defaults
-// server-side to today; bed, cost, and note are optional.
+// Records a garden harvest against a Good Roots crop. The crop is chosen from
+// the GRN crop library (harvests are stored per-crop in Good Roots). amount is
+// required and must be positive; unit defaults to lb; harvestedOn defaults
+// server-side to today; notes is optional.
 export default function RegisterHarvestForm({
   busy,
   serverError,
-  beds,
   crops,
+  initialCropLibraryId = '',
   submitLabel = 'Log harvest',
   onSubmit,
   onCancel,
 }: Props): ReactElement {
-  const [form, setForm] = useState<FormState>(EMPTY);
+  const [form, setForm] = useState<FormState>({
+    cropLibraryId: initialCropLibraryId,
+    amount: '',
+    unit: 'lb',
+    harvestedOn: '',
+    notes: '',
+  });
   const [validationError, setValidationError] = useState<string | null>(null);
-
-  const hasLibrary = !!crops && crops.length > 0;
 
   const update = <K extends keyof FormState>(key: K, value: FormState[K]): void => {
     setForm((f) => ({ ...f, [key]: value }));
   };
 
-  // Selecting a library crop fixes the display crop name; '' returns to custom
-  // free-text entry.
-  const onSelectCrop = (id: string): void => {
-    const picked = crops?.find((c) => c.id === id) ?? null;
-    setForm((f) => ({
-      ...f,
-      cropLibraryId: id,
-      crop: picked ? cropLabel(picked) : '',
-    }));
-  };
-
   const submit = (): void => {
     setValidationError(null);
-    const crop = form.crop.trim();
-    if (crop.length === 0) {
-      setValidationError('Crop is required.');
+    if (!form.cropLibraryId) {
+      setValidationError('Select a crop to record this harvest against.');
       return;
     }
-    const quantity = Number(form.quantity);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      setValidationError('Quantity must be a positive number.');
+    const amount = Number(form.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setValidationError('Amount must be a positive number.');
       return;
     }
 
-    const payload: CreateHarvestLogRequest = { crop, quantity };
-    if (form.cropLibraryId) payload.cropLibraryId = form.cropLibraryId;
+    const payload: RecordCropHarvestRequest = { amount };
     const unit = form.unit.trim();
     if (unit.length > 0) payload.unit = unit;
-    if (form.date) payload.date = form.date;
-    if (form.bedId) payload.bedId = form.bedId;
-    const note = form.note.trim();
-    if (note.length > 0) payload.note = note;
-    if (form.cost.trim().length > 0) {
-      const cost = Number(form.cost);
-      if (!Number.isFinite(cost) || cost < 0) {
-        setValidationError('Cost must be a non-negative number.');
-        return;
-      }
-      payload.cost = cost;
-    }
+    if (form.harvestedOn) payload.harvestedOn = form.harvestedOn;
+    const notes = form.notes.trim();
+    if (notes.length > 0) payload.notes = notes;
 
-    onSubmit(payload);
+    onSubmit(form.cropLibraryId, payload);
   };
-
-  // When a library crop is selected, the name is locked to that entry; the
-  // "Custom" option re-enables free-text editing.
-  const customCrop = form.cropLibraryId === '';
 
   return (
     <div className="card card-body space-y-3 max-w-2xl">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        {hasLibrary ? (
-          <label className="block sm:col-span-1">
-            <span className="field-label">Crop</span>
-            <select
-              className="input"
-              value={form.cropLibraryId}
-              onChange={(e) => onSelectCrop(e.target.value)}
-              disabled={busy}
-            >
-              <option value="">Custom (free text)</option>
-              {crops?.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {cropLabel(c)}
-                </option>
-              ))}
-            </select>
-            {customCrop && (
+      {crops.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Add a crop to your Good Roots crop library before logging a harvest.
+        </p>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <label className="block sm:col-span-1">
+              <span className="field-label">Crop</span>
+              <select
+                className="input"
+                value={form.cropLibraryId}
+                onChange={(e) => update('cropLibraryId', e.target.value)}
+                disabled={busy}
+              >
+                <option value="">Select a crop…</option>
+                {crops.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {cropLabel(c)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="field-label">Amount</span>
               <input
-                type="text"
-                className="input mt-2"
-                value={form.crop}
-                onChange={(e) => update('crop', e.target.value)}
-                placeholder="e.g. tomatoes"
+                type="number"
+                min="0"
+                step="0.01"
+                className="input"
+                value={form.amount}
+                onChange={(e) => update('amount', e.target.value)}
                 disabled={busy}
               />
-            )}
-          </label>
-        ) : (
-          <label className="block sm:col-span-1">
-            <span className="field-label">Crop</span>
+            </label>
+            <label className="block">
+              <span className="field-label">Unit</span>
+              <input
+                type="text"
+                className="input"
+                value={form.unit}
+                onChange={(e) => update('unit', e.target.value)}
+                placeholder="lb, count, bunch"
+                disabled={busy}
+              />
+            </label>
+          </div>
+
+          <label className="block">
+            <span className="field-label">Notes</span>
             <input
               type="text"
               className="input"
-              value={form.crop}
-              onChange={(e) => update('crop', e.target.value)}
-              placeholder="e.g. tomatoes"
+              value={form.notes}
+              onChange={(e) => update('notes', e.target.value)}
+              placeholder="Optional"
               disabled={busy}
-              autoFocus
             />
           </label>
-        )}
-        <label className="block">
-          <span className="field-label">Quantity</span>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            className="input"
-            value={form.quantity}
-            onChange={(e) => update('quantity', e.target.value)}
-            disabled={busy}
-          />
-        </label>
-        <label className="block">
-          <span className="field-label">Unit</span>
-          <input
-            type="text"
-            className="input"
-            value={form.unit}
-            onChange={(e) => update('unit', e.target.value)}
-            placeholder="lb, count, bunch"
-            disabled={busy}
-          />
-        </label>
-      </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <label className="block">
-          <span className="field-label">Bed</span>
-          <select
-            className="input"
-            value={form.bedId}
-            onChange={(e) => update('bedId', e.target.value)}
-            disabled={busy || !beds || beds.length === 0}
-          >
-            <option value="">Unassigned</option>
-            {beds?.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="field-label">Input cost (USD)</span>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            className="input"
-            value={form.cost}
-            onChange={(e) => update('cost', e.target.value)}
-            placeholder="Optional"
-            disabled={busy}
-          />
-          <span className="field-hint mt-1 block">Used to compute cost per unit.</span>
-        </label>
-      </div>
-
-      <label className="block">
-        <span className="field-label">Note</span>
-        <input
-          type="text"
-          className="input"
-          value={form.note}
-          onChange={(e) => update('note', e.target.value)}
-          placeholder="Optional"
-          disabled={busy}
-        />
-      </label>
-
-      <label className="block">
-        <span className="field-label">Harvested on</span>
-        <input
-          type="date"
-          className="input"
-          value={form.date}
-          onChange={(e) => update('date', e.target.value)}
-          disabled={busy}
-        />
-        <span className="field-hint mt-1 block">Defaults to today if left blank.</span>
-      </label>
+          <label className="block">
+            <span className="field-label">Harvested on</span>
+            <input
+              type="date"
+              className="input"
+              value={form.harvestedOn}
+              onChange={(e) => update('harvestedOn', e.target.value)}
+              disabled={busy}
+            />
+            <span className="field-hint mt-1 block">Defaults to today if left blank.</span>
+          </label>
+        </>
+      )}
 
       {validationError && <p className="form-error">{validationError}</p>}
       {serverError && <p className="form-error">{serverError}</p>}
@@ -243,7 +158,12 @@ export default function RegisterHarvestForm({
         <button type="button" className="btn-secondary" onClick={onCancel} disabled={busy}>
           Cancel
         </button>
-        <button type="button" className="btn-primary" onClick={submit} disabled={busy}>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={submit}
+          disabled={busy || crops.length === 0}
+        >
           {busy ? 'Saving...' : submitLabel}
         </button>
       </div>

@@ -263,9 +263,9 @@ function ListingsTab({
       <p className="text-muted-foreground text-sm">
         You haven&apos;t shared any surplus yet. Use{' '}
         <Link to="/garden" className="text-primary-600 hover:underline">
-          Share to Good Roots
+          Share surplus
         </Link>{' '}
-        on a harvest to list it.
+        on a crop in the Garden to list it.
       </p>
     );
   }
