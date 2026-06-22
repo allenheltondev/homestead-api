@@ -150,6 +150,34 @@ Parameters:
     Description: |
       Schedule expression for the daily homestead alerts function. Defaults to
       13:00 UTC daily. Override to change cadence.
+  GrnApiBaseUrl:
+    Type: String
+    Default: ""
+    Description: |
+      Base URL of the Good Roots Network (GRN) API the garden pillar integrates
+      with (e.g. https://api.goodroots.example). Surfaced to the API + Alerts
+      Lambdas as GRN_API_BASE_URL. Leave empty to disable the GRN integration:
+      the /grn/* proxy and harvest publish endpoints then return 503
+      (GrnNotConfigured) and the daily claim-status sync is skipped. See
+      docs/GRN.md.
+  GrnApiTokenSsmPath:
+    Type: String
+    Default: "/homestead/grn/token"
+    Description: |
+      SSM SecureString parameter path holding the GRN API bearer token. Read at
+      runtime (GetParameter WithDecryption) and cached ~5 minutes so rotating
+      the token in SSM takes effect without a redeploy. Surfaced as
+      GRN_API_TOKEN_SSM_PATH. The token only needs to exist when GrnApiBaseUrl
+      is set. See docs/GRN.md.
+  ProducePricePerLb:
+    Type: String
+    Default: "0"
+    Description: |
+      Default market price per pound of garden produce used by the produce
+      output valuation in the P&L (GET /stats/pnl -> outputs.produceValue =
+      harvest lbs x this price). Surfaced as PRODUCE_PRICE_PER_LB; a per-request
+      producePricePerLb query param overrides it. Defaults to 0 so produceValue
+      is 0 and prior P&L behavior is preserved until a price is configured.
 
 # Combined condition so partial-set (one param without the other) is a
 # no-op rather than a deploy error.
@@ -312,6 +340,14 @@ Resources:
           # query params override them.
           MILK_PRICE_PER_GALLON: !Ref MilkPricePerGallon
           MEAT_PRICE_PER_LB: !Ref MeatPricePerLb
+          # Default produce price per lb for the P&L produce tie-in (0 = off).
+          PRODUCE_PRICE_PER_LB: !Ref ProducePricePerLb
+          # Good Roots Network (GRN) two-way integration config. Base URL +
+          # SSM path to the bearer token. Empty base URL disables the
+          # integration (endpoints 503). GRN calls use default Lambda
+          # networking (internet egress, no VPC).
+          GRN_API_BASE_URL: !Ref GrnApiBaseUrl
+          GRN_API_TOKEN_SSM_PATH: !Ref GrnApiTokenSsmPath
       Policies:
         - AWSLambdaBasicExecutionRole
         - Version: 2012-10-17
@@ -337,6 +373,22 @@ Resources:
                 - events:PutEvents
               Resource:
                 - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/default"
+            # SSM: read the GRN bearer token (SecureString) from the configured
+            # path. WithDecryption requires kms:Decrypt; scoped to the SSM
+            # service so the default aws/ssm key (or a CMK SSM uses) can unwrap
+            # the SecureString.
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${GrnApiTokenSsmPath}"
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  "kms:ViaService": !Sub "ssm.${AWS::Region}.amazonaws.com"
       Events:
         ProxyAny:
           Type: Api
@@ -455,21 +507,28 @@ Resources:
           LOW_FEED_ALERT_DAYS: !Ref LowFeedAlertDays
           HOMESTEAD_LATITUDE: !Ref HomesteadLatitude
           HOMESTEAD_LONGITUDE: !Ref HomesteadLongitude
+          # GRN config: the daily claim-status sync calls GET /my/listings and
+          # reconciles local harvest records. Best-effort -- empty base URL
+          # skips the sync. Uses default Lambda networking for egress.
+          GRN_API_BASE_URL: !Ref GrnApiBaseUrl
+          GRN_API_TOKEN_SSM_PATH: !Ref GrnApiTokenSsmPath
       Policies:
         - AWSLambdaBasicExecutionRole
         - Version: 2012-10-17
           Statement:
-            # DynamoDB read on the table + its indexes (read-only stats). No
-            # Scan anywhere.
+            # DynamoDB read + update on the table/indexes: read-only stats plus
+            # writing the reconciled grnStatus onto linked harvest logs during
+            # the GRN claim-status sync. No Scan anywhere.
             - Effect: Allow
               Action:
                 - dynamodb:GetItem
                 - dynamodb:Query
                 - dynamodb:BatchGetItem
+                - dynamodb:UpdateItem
               Resource:
                 - !GetAtt HomesteadTable.Arn
                 - !Sub "${HomesteadTable.Arn}/index/*"
-            # EventBridge: publish the HomesteadAlert event to the default bus.
+            # EventBridge: publish the HomesteadAlert + GrnListingClaimed events.
             - Effect: Allow
               Action:
                 - events:PutEvents
@@ -481,6 +540,20 @@ Resources:
                 - ses:SendEmail
                 - ses:SendRawEmail
               Resource: "*"
+            # SSM: read the GRN bearer token (SecureString) for the claim-status
+            # sync, plus KMS decrypt scoped to the SSM service.
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${GrnApiTokenSsmPath}"
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  "kms:ViaService": !Sub "ssm.${AWS::Region}.amazonaws.com"
       Events:
         DailySchedule:
           Type: Schedule
