@@ -41,17 +41,22 @@ function toIsoDateTime(value, label) {
 
 // Builds a GRN UpsertListingRequest from a stored harvest log + the publish
 // request body. The harvest gives quantity/unit and (optionally) defaults; the
-// body must supply the GRN cropId (a catalog UUID the harvest doesn't carry)
-// and the availability window. Returns the exact upstream payload.
-export function buildListingPayload(harvest, body = {}) {
+// availability window comes from the body. The GRN catalog cropId (+ optional
+// varietyId) is resolved by the route from the harvest's linked grower crop
+// (cropLibraryId -> GRN /crops/{id}.canonical_id) and passed in via
+// `resolved`. Returns the exact upstream payload.
+export function buildListingPayload(harvest, body = {}, resolved = {}) {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     throw new BadRequestError("request body must be a JSON object");
   }
 
-  // cropId is REQUIRED by UpsertListingRequest and is a GRN catalog UUID, so it
-  // must come from the publish body (the local harvest only has a crop name).
-  const cropId = requireUuid(body.cropId, "cropId");
-  const varietyId = optionalUuid(body.varietyId, "varietyId");
+  // cropId is REQUIRED by UpsertListingRequest and is a GRN catalog UUID. It is
+  // resolved from the harvest's linked grower crop (the local harvest only has
+  // a crop name); the publish route fetches it before calling this.
+  const cropId = requireUuid(resolved.cropId, "cropId");
+  // varietyId: prefer an explicit body override, else the resolved grower-crop
+  // variety. Both optional.
+  const varietyId = optionalUuid(body.varietyId ?? resolved.varietyId, "varietyId");
 
   // Quantity/unit default from the harvest but can be overridden in the body.
   const quantityTotal = body.quantityTotal ?? harvest.quantity;

@@ -259,43 +259,41 @@ unchanged.
   a delivery failure never fails the run). The optional weather fetch needs
   internet egress; the function runs on default Lambda networking (no VPC) so
   it has outbound access. No Scans.
-- **Garden beds** are single metadata items (`pk = BED#<id>`, `sk = METADATA`)
-  listed via a collection-partition GSI keyed by name (`gsi1pk = BED`,
-  `gsi1sk = <name>`), so the alphabetical "list all beds" view is one GSI1
-  Query (mirrors pastures). Fields: `name`, optional `sizeSqFt`.
-  `POST/GET/PATCH/DELETE /beds`. PATCH rewrites `gsi1sk` on a name change. No
-  Scans.
-- **Plantings** are single metadata items (`pk = PLANTING#<id>`,
-  `sk = METADATA`) listed via a collection-partition GSI ordered by plantedAt
-  (`gsi1pk = PLANTING`, `gsi1sk = <plantedAt>#<id>`). Fields: optional `bedId`,
-  `cropName`, optional `variety`, `plantedAt`, optional `expectedHarvestAt`,
-  `status` (planned|growing|harvested|failed). `status` is a plain attribute
-  (filtered in code) so a status change never rewrites the index key.
-  `POST/GET(?status=)/PATCH/DELETE /plantings`. PATCH rewrites `gsi1sk` on a
-  plantedAt change; create validates `bedId` exists. No Scans.
-- **Harvest logs** partition by month (`pk = HARVEST#<yyyy-mm>`, derived from
-  `harvestedAt`); the sort key `LOG#<ts>#<id>` (ts = `harvestedAt` ISO) keeps a
-  month's logs chronological. Fields: `cropName`, optional `variety`,
-  `quantity`, `unit` (lb|oz|each|bunch), `harvestedAt`, optional `plantingId`,
-  `surplus` (bool), plus GRN linkage `grnListingId?` / `grnStatus?`. An
-  id-addressable pointer (`pk = HARVESTID#<id>`, `sk = POINTER`) holds the real
-  pk/sk so `GET/DELETE /harvest-logs/{id}` and the GRN publish endpoints
-  resolve the row scan-free. `POST/GET(?from=&to=)/GET{id}/DELETE
-  /harvest-logs` (range fan-out by month; id-pointer DELETE). Create publishes
-  `HarvestLogged`. No Scans.
+- **Garden structure lives in GRN.** Crops, the crop catalog, and garden beds
+  are owned by the Good Roots Network (GRN), reached via authenticated
+  pass-through routes (`api/routes/grnGarden.mjs` -> `api/lib/grn.mjs`); the
+  homestead keeps **no** local beds/plantings/planting-calendar records. See
+  `docs/GRN.md` for the `/grn/crops`, `/grn/catalog/crops*`, and `/grn/beds`
+  endpoint set.
+- **Harvest logs** (the one garden record that stays local) partition by month
+  (`pk = HARVEST#<yyyy-mm>`, derived from `harvestedAt`); the sort key
+  `LOG#<ts>#<id>` (ts = `harvestedAt` ISO) keeps a month's logs chronological.
+  Fields: `cropName` (required, denormalized for display), optional `variety`,
+  `quantity`, `unit` (lb|oz|each|bunch), `harvestedAt`, optional
+  **`cropLibraryId`** (the GRN grower-crop id this harvest came from) and
+  optional **`grnBedId`** (the GRN garden-bed id), `surplus` (bool), plus GRN
+  listing linkage `grnListingId?` / `grnStatus?`. An id-addressable pointer
+  (`pk = HARVESTID#<id>`, `sk = POINTER`) holds the real pk/sk so
+  `GET/DELETE /harvest-logs/{id}` and the GRN publish endpoints resolve the row
+  scan-free. `POST/GET(?from=&to=)/GET{id}/DELETE /harvest-logs` (range fan-out
+  by month; id-pointer DELETE). Create publishes `HarvestLogged`. No Scans.
 - **Garden stats** (`GET /stats/garden?period=`) aggregate harvest logs for the
-  period into total pounds (lb/oz normalized; each/bunch counted separately),
-  `byCrop`, and a `yieldByBed` rollup that joins each log's `plantingId ->
-  bedId` via the planting + bed collection partitions. The **planting
-  calendar** (`GET /garden/calendar?zone=`) is served from a local static
-  seasonal table (`api/domain/plantingCalendar.mjs`), best-effort enriched with
-  the GRN crop catalog when GRN is configured. No Scans.
+  period into total pounds (lb/oz normalized; each/bunch counted separately) and
+  a `byCrop` rollup grouped by `cropName`, surfacing each crop's
+  `cropLibraryId` when its logs are linked to a GRN grower crop. (The local
+  planting/bed yield join is gone now that beds live in GRN.) No Scans.
 - **GRN two-way integration.** The garden pillar publishes surplus harvests to
-  the Good Roots Network and proxies its browse/claim/request endpoints. See
-  `docs/GRN.md`. `POST/DELETE /harvest-logs/{id}/publish` create/expire a GRN
-  listing (mapping the harvest to GRN `UpsertListingRequest`:
-  `title`/`cropId`/`quantityTotal`/`unit`/`availableStart`/`availableEnd`/`status`)
-  and store/clear `grnListingId` + `grnStatus`. `GET /grn/my-listings`,
+  the Good Roots Network and proxies its crop-library / catalog / garden-bed /
+  browse / claim / request endpoints. See `docs/GRN.md`.
+  `POST/DELETE /harvest-logs/{id}/publish` create/expire a GRN listing: publish
+  resolves the harvest's `cropLibraryId` -> GRN `GET /crops/{id}` ->
+  `canonical_id` (catalog cropId) + `variety_id` to populate the GRN
+  `UpsertListingRequest`
+  (`title`/`cropId`/`quantityTotal`/`unit`/`availableStart`/`availableEnd`/`status`);
+  a harvest with no `cropLibraryId` is rejected `422` ("link this harvest to a
+  crop before sharing"). `GET/POST/GET{id}/PUT{id}/DELETE{id} /grn/crops`,
+  `GET /grn/catalog/crops`, `GET /grn/catalog/crops/{cropId}/varieties`,
+  `GET/POST/GET{id}/PUT{id}/DELETE{id} /grn/beds`, `GET /grn/my-listings`,
   `GET /grn/discover?lat=&lng=&radius=`, `GET /grn/requests`, `POST /grn/claims`,
   `GET /grn/claims/{id}` proxy GRN. The daily `AlertsFunction` runs a
   best-effort claim-status sync: it reconciles linked harvests' `grnStatus`

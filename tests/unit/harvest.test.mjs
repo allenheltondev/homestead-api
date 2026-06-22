@@ -192,6 +192,16 @@ describe("deleteHarvestLog + formatHarvestLog", () => {
     });
     expect(out.grnListingId).toBeNull();
     expect(out.grnStatus).toBeNull();
+    expect(out.cropLibraryId).toBeNull();
+    expect(out.grnBedId).toBeNull();
     expect(out.surplus).toBe(false);
+  });
+
+  test("validate accepts optional cropLibraryId + grnBedId", () => {
+    const fields = validateHarvestLogCreate({
+      cropName: "Tomato", quantity: 3, cropLibraryId: "gc-1", grnBedId: "bed-1",
+    });
+    expect(fields.cropLibraryId).toBe("gc-1");
+    expect(fields.grnBedId).toBe("bed-1");
   });
 });

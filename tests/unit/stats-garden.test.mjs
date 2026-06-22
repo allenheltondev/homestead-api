@@ -15,47 +15,44 @@ beforeEach(() => {
   delete process.env.PRODUCE_PRICE_PER_LB;
 });
 
-// gardenStats issues, per month: harvest query (base table) then plantings GSI
-// then beds GSI. With a single-month period that is 3 queries.
-function mockGarden({ harvests, plantings = [], beds = [] }) {
+// gardenStats issues, per month, one harvest query (base table). Crops + beds
+// live in GRN now, so there is no planting/bed join.
+function mockGarden({ harvests }) {
   send.mockImplementation((cmd) => {
     const pk = cmd.input.ExpressionAttributeValues?.[":pk"];
     if (typeof pk === "string" && pk.startsWith("HARVEST#")) return { Items: harvests };
-    if (pk === "PLANTING") return { Items: plantings };
-    if (pk === "BED") return { Items: beds };
     return { Items: [] };
   });
 }
 
 describe("gardenStats", () => {
-  test("totals lbs by crop (oz -> lb) and yields per bed via planting->bed join", async () => {
+  test("totals lbs by crop name (oz -> lb), counts count-units, surfaces cropLibraryId", async () => {
     mockGarden({
       harvests: [
-        { cropName: "Tomato", quantity: 5, unit: "lb", plantingId: "p1" },
-        { cropName: "Tomato", quantity: 16, unit: "oz", plantingId: "p1" },
+        { cropName: "Tomato", quantity: 5, unit: "lb", cropLibraryId: "gc-1" },
+        { cropName: "Tomato", quantity: 16, unit: "oz" },
         { cropName: "Basil", quantity: 4, unit: "bunch" },
       ],
-      plantings: [{ id: "p1", bedId: "b1" }],
-      beds: [{ id: "b1", name: "North" }],
     });
 
     const stats = await gardenStats("2026-06", ["2026-06"]);
     expect(stats.totalLbs).toBeCloseTo(6); // 5 + 1
+    expect(stats).not.toHaveProperty("yieldByBed");
+
     const tomato = stats.byCrop.find((c) => c.cropName === "Tomato");
     expect(tomato.lbs).toBeCloseTo(6);
+    expect(tomato.cropLibraryId).toBe("gc-1");
+
     const basil = stats.byCrop.find((c) => c.cropName === "Basil");
     expect(basil.lbs).toBe(0);
     expect(basil.count).toBe(4);
-
-    const north = stats.yieldByBed.find((b) => b.bedId === "b1");
-    expect(north.name).toBe("North");
-    expect(north.lbs).toBeCloseTo(6);
+    expect(basil.cropLibraryId).toBeNull();
   });
 
-  test("logs with no planting roll up under unassigned", async () => {
-    mockGarden({ harvests: [{ cropName: "Kale", quantity: 2, unit: "lb" }] });
+  test("logs with no crop name roll up under unknown", async () => {
+    mockGarden({ harvests: [{ quantity: 2, unit: "lb" }] });
     const stats = await gardenStats("2026-06", ["2026-06"]);
-    expect(stats.yieldByBed[0].bedId).toBeNull();
+    expect(stats.byCrop[0].cropName).toBe("unknown");
   });
 });
 

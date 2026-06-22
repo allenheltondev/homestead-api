@@ -1233,11 +1233,13 @@ export async function growoutStats(months) {
 
 // --- Garden / harvest analytics ----------------------------------------
 // Harvest logs partition by month on the base table (pk = HARVEST#<yyyy-mm>).
-// We Query each month in the period and aggregate quantity by crop, plus a
-// yield-per-bed rollup (joining each log's plantingId -> bedId via the
-// plantings collection). Weight units (lb/oz) normalize to pounds; count
-// units (each/bunch) are summed separately so the byCrop totals stay honest.
-// All reads Query known month / collection partitions -- no Scans.
+// We Query each month in the period and aggregate quantity by crop name (the
+// denormalized display name on each log), surfacing the GRN grower-crop id
+// (cropLibraryId) when a log is linked. Garden bed structure + crops now live
+// in the Good Roots Network, so there is no local planting/bed join. Weight
+// units (lb/oz) normalize to pounds; count units (each/bunch) are summed
+// separately so the byCrop totals stay honest. All reads Query known month
+// partitions -- no Scans.
 
 // Conversion to pounds for the weight units. Count units (each/bunch) are not
 // weights, so they are tracked under `countByCrop` instead of `totalLbs`.
@@ -1270,50 +1272,14 @@ async function harvestLogsForMonths(months) {
   return batches.flat();
 }
 
-// Lists every planting (collection-partition GSI, gsi1pk = PLANTING) so each
-// harvest log's plantingId can be resolved to a bedId for the per-bed yield.
-// No Scan.
-async function plantingsForYield() {
-  return queryAll({
-    TableName: TABLE_NAME,
-    IndexName: "GSI1",
-    KeyConditionExpression: "gsi1pk = :pk",
-    ExpressionAttributeValues: { ":pk": "PLANTING" },
-  });
-}
-
-// Lists every bed (collection-partition GSI, gsi1pk = BED) so a per-bed yield
-// row can carry the bed name. No Scan.
-async function bedsForYield() {
-  return queryAll({
-    TableName: TABLE_NAME,
-    IndexName: "GSI1",
-    KeyConditionExpression: "gsi1pk = :pk",
-    ExpressionAttributeValues: { ":pk": "BED" },
-  });
-}
-
-// GET /stats/garden — harvest totals by crop (pounds + counts) and a
-// yield-per-bed breakdown for the period.
+// GET /stats/garden — harvest totals by crop name (pounds + counts) for the
+// period, surfacing the GRN grower-crop id (cropLibraryId) when the crop's logs
+// are linked to one. Crops + garden beds live in the Good Roots Network now, so
+// there is no local planting/bed join.
 export async function gardenStats(period, months) {
-  const [logs, plantings, beds] = await Promise.all([
-    harvestLogsForMonths(months),
-    plantingsForYield(),
-    bedsForYield(),
-  ]);
-
-  // plantingId -> bedId, and bedId -> bed name, for the per-bed rollup.
-  const bedByPlanting = {};
-  for (const p of plantings) {
-    if (p.id) bedByPlanting[p.id] = p.bedId ?? null;
-  }
-  const bedName = {};
-  for (const b of beds) {
-    if (b.id) bedName[b.id] = b.name ?? null;
-  }
+  const logs = await harvestLogsForMonths(months);
 
   const byCropMap = {};
-  const byBedMap = {};
   let totalLbs = 0;
 
   for (const log of logs) {
@@ -1323,32 +1289,28 @@ export async function gardenStats(period, months) {
     const lbs = harvestLbs(log.quantity, log.unit);
     const isCount = log.unit === "each" || log.unit === "bunch";
 
-    if (!byCropMap[crop]) byCropMap[crop] = { lbs: 0, count: 0 };
+    if (!byCropMap[crop]) byCropMap[crop] = { lbs: 0, count: 0, cropLibraryId: null };
     byCropMap[crop].lbs += lbs;
     if (isCount) byCropMap[crop].count += Number(log.quantity) || 0;
+    // Surface the GRN grower-crop id when a log carries one. First non-empty
+    // wins so a crop linked on at least one log reports its cropLibraryId.
+    if (byCropMap[crop].cropLibraryId === null
+      && typeof log.cropLibraryId === "string" && log.cropLibraryId.length > 0) {
+      byCropMap[crop].cropLibraryId = log.cropLibraryId;
+    }
     totalLbs += lbs;
-
-    // Per-bed yield: resolve the log's planting -> bed; logs with no planting
-    // (or a planting with no bed) roll up under "unassigned".
-    const bedId = log.plantingId ? bedByPlanting[log.plantingId] ?? null : null;
-    const bedKey = bedId ?? "unassigned";
-    if (!byBedMap[bedKey]) byBedMap[bedKey] = { bedId, lbs: 0 };
-    byBedMap[bedKey].lbs += lbs;
   }
 
   const byCrop = Object.entries(byCropMap)
-    .map(([cropName, v]) => ({ cropName, lbs: v.lbs, count: v.count }))
+    .map(([cropName, v]) => ({
+      cropName,
+      cropLibraryId: v.cropLibraryId,
+      lbs: v.lbs,
+      count: v.count,
+    }))
     .sort((a, b) => b.lbs - a.lbs || a.cropName.localeCompare(b.cropName));
 
-  const yieldByBed = Object.values(byBedMap)
-    .map((v) => ({
-      bedId: v.bedId,
-      name: v.bedId ? bedName[v.bedId] ?? null : null,
-      lbs: v.lbs,
-    }))
-    .sort((a, b) => b.lbs - a.lbs);
-
-  return { period, totalLbs, byCrop, yieldByBed };
+  return { period, totalLbs, byCrop };
 }
 
 // Resolve the produce price per pound: explicit override wins, else the

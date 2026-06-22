@@ -45,7 +45,11 @@ export function buildHarvestItem(fields) {
     quantity: fields.quantity,
     unit: fields.unit,
     harvestedAt: ts,
-    plantingId: fields.plantingId,
+    // GRN linkage: the grower-crop (crop library) id this harvest came from,
+    // and the GRN garden-bed id it was harvested from. Both optional — a
+    // quick log can stay unlinked until the grower wants to share it.
+    cropLibraryId: fields.cropLibraryId,
+    grnBedId: fields.grnBedId,
     surplus: fields.surplus,
     createdAt,
   };

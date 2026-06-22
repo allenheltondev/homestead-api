@@ -1,6 +1,6 @@
 import { emptyResponse, jsonResponse, parseBody } from "../services/http.mjs";
 import { publishEvent } from "../services/events.mjs";
-import { ConflictError } from "../services/errors.mjs";
+import { ConflictError, UnprocessableEntityError } from "../services/errors.mjs";
 import {
   validateHarvestLogCreate,
   validateHarvestLogQuery,
@@ -14,7 +14,7 @@ import {
   listHarvestLogs,
   updateHarvestGrnFields,
 } from "../domain/harvest.mjs";
-import { createListing, expireListing } from "../lib/grn.mjs";
+import { createListing, expireListing, getGrowerCrop } from "../lib/grn.mjs";
 
 // Harvest-log routes. Handlers stay thin: validate -> domain -> format. The
 // publish endpoints add the GRN two-way integration: publishing a surplus
@@ -61,17 +61,37 @@ export function registerHarvestRoutes(app) {
   });
 
   // POST /harvest-logs/{id}/publish — publish the harvest as a GRN listing.
-  // Builds an UpsertListing from the harvest (+ the publish body's required
-  // GRN cropId / availability window), POSTs it to GRN with the harvest id as
-  // the Idempotency-Key, then stores grnListingId + grnStatus=active locally.
+  // The harvest only carries a crop name, so the GRN catalog cropId (+ variety)
+  // is resolved from the harvest's linked grower crop: cropLibraryId -> GRN
+  // GET /crops/{id} -> canonical_id (catalog cropId) + variety_id. A harvest
+  // with no cropLibraryId is rejected (422) so the grower links it first. The
+  // listing is POSTed to GRN with the harvest id as the Idempotency-Key, then
+  // grnListingId + grnStatus=active are stored locally.
   app.post("/harvest-logs/:id/publish", async ({ event, params }) => {
     const harvest = await getHarvestLog(params.id);
     if (harvest.grnListingId) {
       throw new ConflictError("harvest is already published to the Good Roots Network");
     }
+    if (!harvest.cropLibraryId) {
+      throw new UnprocessableEntityError(
+        "link this harvest to a crop before sharing it to the Good Roots Network",
+      );
+    }
 
-    const payload = buildListingPayload(harvest, parseBody(event));
     const correlationId = event?.requestContext?.requestId;
+
+    // Resolve the linked grower crop to its catalog cropId (+ variety). The
+    // grower-crop's canonical_id is the catalog cropId; crop_id is deprecated.
+    const growerCrop = await getGrowerCrop(harvest.cropLibraryId, { correlationId });
+    const cropId = growerCrop?.canonical_id ?? null;
+    if (!cropId) {
+      throw new UnprocessableEntityError(
+        "the linked crop has no catalog entry yet; pick a catalog crop before sharing",
+      );
+    }
+    const resolved = { cropId, varietyId: growerCrop?.variety_id ?? undefined };
+
+    const payload = buildListingPayload(harvest, parseBody(event), resolved);
     const listing = await createListing(payload, { idempotencyKey: harvest.id, correlationId });
 
     const grnListingId = listing?.id ?? null;

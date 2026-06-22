@@ -41,6 +41,15 @@ export class ConflictError extends ApiError {
   }
 }
 
+// The request was well-formed but cannot be processed in the current state.
+// Used by the harvest publish path when a harvest is not linked to a GRN crop
+// (so its catalog cropId can't be resolved) -- the client must link it first.
+export class UnprocessableEntityError extends ApiError {
+  constructor(message) {
+    super(422, message, "UnprocessableEntity");
+  }
+}
+
 export class UpstreamError extends ApiError {
   constructor(message, upstreamStatus) {
     super(502, message, "UpstreamError");

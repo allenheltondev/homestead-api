@@ -13,11 +13,10 @@ import { registerBreedingRoutes } from "./breeding.mjs";
 import { registerGrowoutRoutes } from "./growout.mjs";
 import { registerCareTaskRoutes } from "./careTask.mjs";
 import { registerSalesRoutes } from "./sales.mjs";
-import { registerBedRoutes } from "./beds.mjs";
-import { registerPlantingRoutes } from "./plantings.mjs";
 import { registerHarvestRoutes } from "./harvest.mjs";
 import { registerGardenRoutes } from "./garden.mjs";
 import { registerGrnRoutes } from "./grn.mjs";
+import { registerGrnGardenRoutes } from "./grnGarden.mjs";
 
 // Single shared route-registration point. Each feature stream adds ONE
 // import line above and ONE registration line below, so wiring a new
@@ -39,9 +38,8 @@ export function registerRoutes(app) {
   registerGrowoutRoutes(app);
   registerCareTaskRoutes(app);
   registerSalesRoutes(app);
-  registerBedRoutes(app);
-  registerPlantingRoutes(app);
   registerHarvestRoutes(app);
   registerGardenRoutes(app);
   registerGrnRoutes(app);
+  registerGrnGardenRoutes(app);
 }
