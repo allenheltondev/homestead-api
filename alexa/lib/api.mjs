@@ -206,6 +206,31 @@ export function createApiClient(handlerInput) {
     // GET /stats/pnl — profit-and-loss (income, expenses, net) for an
     // optional period.
     getPnl: (query) => request(token, "GET", joinQuery("/stats/pnl", query)),
+
+    // --- Garden pillar + Good Roots Network (GRN) ------------------------
+    // POST /harvest-logs — log a garden harvest (crop + quantity + unit,
+    // optional date). The server returns the created harvest log.
+    recordHarvest: (fields) => request(token, "POST", "/harvest-logs", fields),
+    // GET /stats/garden — garden harvest stats for an optional period.
+    getGardenStats: (query) =>
+      request(token, "GET", joinQuery("/stats/garden", query)),
+    // GET /garden/calendar — the planting/sowing calendar for the homestead.
+    getPlantingCalendar: () => request(token, "GET", "/garden/calendar"),
+    // POST /harvest-logs/{id}/publish — share surplus from a harvest log to
+    // the Good Roots Network as a listing other members can claim.
+    publishSurplus: (id, fields) =>
+      request(
+        token,
+        "POST",
+        `/harvest-logs/${encodeURIComponent(id)}/publish`,
+        fields,
+      ),
+    // GET /grn/my-listings — the member's surplus listings on the Good Roots
+    // Network, including each listing's claim status.
+    getGrnListings: () => request(token, "GET", "/grn/my-listings"),
+    // GET /grn/requests — community needs/requests posted to the Good Roots
+    // Network that the member could fill.
+    getGrnRequests: () => request(token, "GET", "/grn/requests"),
   };
 }
 

@@ -12,6 +12,7 @@ import {
   buildMilkFields,
   buildWithinDays,
   buildCareTaskRef,
+  buildHarvestFields,
   __testables,
 } from "../lib/slots.mjs";
 
@@ -393,5 +394,70 @@ describe("buildCareTaskRef", () => {
   });
   test("undefined when absent", () => {
     expect(buildCareTaskRef(intentWith({}))).toBeUndefined();
+  });
+});
+
+describe("normalizeHarvestUnit", () => {
+  test("maps spoken units to canonical tokens", () => {
+    expect(__testables.normalizeHarvestUnit("pounds")).toBe("lb");
+    expect(__testables.normalizeHarvestUnit("Ounces")).toBe("oz");
+    expect(__testables.normalizeHarvestUnit("bunches")).toBe("bunch");
+    expect(__testables.normalizeHarvestUnit("baskets")).toBe("basket");
+  });
+  test("returns undefined for unknown units", () => {
+    expect(__testables.normalizeHarvestUnit("scoops")).toBeUndefined();
+  });
+});
+
+describe("buildHarvestFields", () => {
+  test("defaults to pounds when no unit is given", () => {
+    const fields = buildHarvestFields(
+      intentWith({
+        crop: {
+          value: "cherry tomatoes",
+          resolutions: {
+            resolutionsPerAuthority: [
+              { values: [{ value: { name: "tomatoes" } }] },
+            ],
+          },
+        },
+        quantity: { value: "5" },
+        date: { value: "2026-06-21" },
+      }),
+    );
+    expect(fields).toEqual({
+      crop: "tomatoes",
+      quantity: 5,
+      unit: "lb",
+      date: "2026-06-21",
+    });
+  });
+
+  test("normalizes the spoken unit", () => {
+    const fields = buildHarvestFields(
+      intentWith({
+        crop: { value: "kale" },
+        quantity: { value: "3" },
+        unit: { value: "bunches" },
+      }),
+    );
+    expect(fields).toEqual({ crop: "kale", quantity: 3, unit: "bunch" });
+  });
+
+  test("omits quantity + unit when no quantity is given", () => {
+    expect(
+      buildHarvestFields(intentWith({ crop: { value: "squash" } })),
+    ).toEqual({ crop: "squash" });
+  });
+
+  test("drops an invalid date", () => {
+    const fields = buildHarvestFields(
+      intentWith({
+        crop: { value: "beans" },
+        quantity: { value: "2" },
+        date: { value: "tomorrow" },
+      }),
+    );
+    expect(fields).toEqual({ crop: "beans", quantity: 2, unit: "lb" });
   });
 });

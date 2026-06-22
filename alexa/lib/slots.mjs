@@ -304,4 +304,72 @@ export function buildCareTaskRef(intent) {
   return textSlot(intent, "task");
 }
 
-export const __testables = { normalizeUnit, parseCount, normalizeMilkUnit };
+// --- Garden pillar: harvest logging --------------------------------------
+
+// Produce/quantity units the harvest API accepts. Spoken synonyms map onto the
+// canonical token. Garden harvests are weighed (pounds/ounces/kilograms) or
+// counted by piece/bunch/basket, so this is its own table separate from feed
+// and milk units.
+const HARVEST_UNIT_SYNONYMS = {
+  lb: "lb",
+  lbs: "lb",
+  pound: "lb",
+  pounds: "lb",
+  oz: "oz",
+  ounce: "oz",
+  ounces: "oz",
+  kg: "kg",
+  kgs: "kg",
+  kilogram: "kg",
+  kilograms: "kg",
+  gram: "g",
+  grams: "g",
+  g: "g",
+  piece: "piece",
+  pieces: "piece",
+  each: "piece",
+  count: "piece",
+  bunch: "bunch",
+  bunches: "bunch",
+  basket: "basket",
+  baskets: "basket",
+  bushel: "bushel",
+  bushels: "bushel",
+  pint: "pint",
+  pints: "pint",
+  quart: "quart",
+  quarts: "quart",
+};
+
+function normalizeHarvestUnit(raw) {
+  if (typeof raw !== "string") return undefined;
+  return HARVEST_UNIT_SYNONYMS[raw.trim().toLowerCase()];
+}
+
+// Builds the POST /harvest-logs body for the dialog-delegated LogHarvestIntent.
+// Required slots (crop + quantity) are guaranteed by the dialog model on
+// COMPLETED; the unit defaults to pounds and the date is optional.
+export function buildHarvestFields(intent) {
+  const crop = textSlot(intent, "crop");
+  const quantity = parseCount(slotValue(intent, "quantity"));
+  const unit = normalizeHarvestUnit(slotValue(intent, "unit")) ?? "lb";
+
+  const fields = {};
+  if (crop) fields.crop = crop;
+  if (Number.isFinite(quantity)) {
+    fields.quantity = quantity;
+    fields.unit = unit;
+  }
+
+  const date = slotValue(intent, "date");
+  if (isIsoDate(date)) fields.date = date.trim();
+
+  return fields;
+}
+
+export const __testables = {
+  normalizeUnit,
+  parseCount,
+  normalizeMilkUnit,
+  normalizeHarvestUnit,
+};

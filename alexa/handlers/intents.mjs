@@ -27,6 +27,11 @@ import {
   renderCareDue,
   renderUpcomingDue,
   renderPnl,
+  renderHarvestLogged,
+  renderGardenStats,
+  renderSurplusPublished,
+  renderGrnListings,
+  renderGrnRequests,
 } from "../lib/speech.mjs";
 import {
   buildBirthFields,
@@ -41,6 +46,7 @@ import {
   buildMilkFields,
   buildWithinDays,
   buildCareTaskRef,
+  buildHarvestFields,
   slotValue,
 } from "../lib/slots.mjs";
 import {
@@ -64,7 +70,10 @@ const HELP_TEXT =
   "ask how much you've spent on health, ask about your loss rate, " +
   "ask for your weekly homestead digest, log a milking, ask about your " +
   "milk production, ask what care tasks are due, mark a care task complete, " +
-  "ask what's due to hatch or give birth, or ask whether you're in the black. " +
+  "ask what's due to hatch or give birth, ask whether you're in the black, " +
+  "log a garden harvest, ask about your garden stats, share your surplus " +
+  "produce with the Good Roots Network, ask whether anyone claimed your " +
+  "produce, or ask what the community needs. " +
   "What would you like to do?";
 
 function getIntentName(handlerInput) {
@@ -628,6 +637,132 @@ export const GetPnlIntentHandler = {
   },
 };
 
+// --- Garden pillar + Good Roots Network (GRN) ----------------------------
+
+export const LogHarvestIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "LogHarvestIntent");
+  },
+  async handle(handlerInput) {
+    if (dialogIncomplete(handlerInput)) return delegate(handlerInput);
+
+    const intent = handlerInput.requestEnvelope.request.intent;
+    const fields = buildHarvestFields(intent);
+    try {
+      const api = createApiClient(handlerInput);
+      const result = await api.recordHarvest(fields);
+      const text = renderHarvestLogged(result ?? fields);
+      return addConfirmationScreen(handlerInput, "Harvest logged", text)
+        .speak(text)
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't log that harvest right now.",
+      );
+    }
+  },
+};
+
+export const GetGardenStatsIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "GetGardenStatsIntent");
+  },
+  async handle(handlerInput) {
+    const intent = handlerInput.requestEnvelope.request.intent;
+    try {
+      const api = createApiClient(handlerInput);
+      const stats = await api.getGardenStats(buildPeriodQuery(intent));
+      return handlerInput.responseBuilder
+        .speak(renderGardenStats(stats))
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't get your garden stats right now.",
+      );
+    }
+  },
+};
+
+// ShareSurplusIntent — dialog/confirm-gated write. Publishes a harvest's
+// surplus to the Good Roots Network. The dialog elicits + confirms the crop;
+// on COMPLETED we publish using the crop as the harvest reference.
+export const ShareSurplusIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "ShareSurplusIntent");
+  },
+  async handle(handlerInput) {
+    if (dialogIncomplete(handlerInput)) return delegate(handlerInput);
+
+    const intent = handlerInput.requestEnvelope.request.intent;
+    const crop = slotValue(intent, "crop");
+    const body = {};
+    const quantity = slotValue(intent, "quantity");
+    if (quantity != null && Number.isFinite(Number(quantity))) {
+      body.quantity = Number(quantity);
+    }
+    try {
+      const api = createApiClient(handlerInput);
+      const result = await api.publishSurplus(crop, body);
+      const text = renderSurplusPublished(result ?? { crop, ...body });
+      return addConfirmationScreen(handlerInput, "Surplus shared", text)
+        .speak(text)
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't share that surplus right now.",
+      );
+    }
+  },
+};
+
+export const GetGrnListingsIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "GetGrnListingsIntent");
+  },
+  async handle(handlerInput) {
+    try {
+      const api = createApiClient(handlerInput);
+      const listings = await api.getGrnListings();
+      return handlerInput.responseBuilder
+        .speak(renderGrnListings(listings))
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't check your Good Roots Network listings right now.",
+      );
+    }
+  },
+};
+
+export const GetGrnRequestsIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "GetGrnRequestsIntent");
+  },
+  async handle(handlerInput) {
+    try {
+      const api = createApiClient(handlerInput);
+      const requests = await api.getGrnRequests();
+      return handlerInput.responseBuilder
+        .speak(renderGrnRequests(requests))
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't check what the community needs right now.",
+      );
+    }
+  },
+};
+
 export const HelpIntentHandler = {
   canHandle(handlerInput) {
     return isIntent(handlerInput, "AMAZON.HelpIntent");
@@ -812,6 +947,11 @@ export const handlers = [
   CompleteCareTaskIntentHandler,
   GetUpcomingDueIntentHandler,
   GetPnlIntentHandler,
+  LogHarvestIntentHandler,
+  GetGardenStatsIntentHandler,
+  ShareSurplusIntentHandler,
+  GetGrnListingsIntentHandler,
+  GetGrnRequestsIntentHandler,
   HelpIntentHandler,
   CancelAndStopIntentHandler,
   // Yes/No confirm the agent's pending writes — register BEFORE the catch-all

@@ -555,6 +555,144 @@ function capitalizeFirst(text) {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
+// --- Garden pillar + Good Roots Network (GRN) ----------------------------
+
+// Speaks a harvest unit token as a natural noun ("lb" -> "pound"). Falls back
+// to the raw token (e.g. "bunch", "basket") which already reads naturally.
+const HARVEST_UNIT_WORDS = {
+  lb: "pound",
+  oz: "ounce",
+  kg: "kilogram",
+  g: "gram",
+};
+
+function speakHarvestQuantity(quantity, unit) {
+  const noun = HARVEST_UNIT_WORDS[unit] ?? unit ?? "pound";
+  return pluralize(Number(quantity) || 0, noun);
+}
+
+// Confirmation line after POST /harvest-logs ("Got it. I logged 5 pounds of
+// tomatoes.").
+export function renderHarvestLogged(result) {
+  if (!result || typeof result !== "object") {
+    return "Got it. I logged that harvest.";
+  }
+  const crop = result.crop ?? "produce";
+  const quantity = result.quantity;
+  const unit = result.unit ?? "lb";
+  if (quantity == null || !Number.isFinite(Number(quantity))) {
+    return `Got it. I logged a ${crop} harvest.`;
+  }
+  return `Got it. I logged ${speakHarvestQuantity(quantity, unit)} of ${crop}.`;
+}
+
+// Renders GET /stats/garden: total harvested over the period and an optional
+// top-crop breakdown ("You've harvested 40 pounds from the garden this month:
+// 18 pounds of tomatoes, 12 pounds of squash.").
+export function renderGardenStats(stats) {
+  if (!stats || typeof stats !== "object") {
+    return "I couldn't read your garden stats right now.";
+  }
+  const periodLabel = stats.periodLabel ?? "this month";
+  const unit = stats.unit ?? "lb";
+  const total = Number(stats.total ?? stats.totalQuantity ?? 0) || 0;
+  if (!(total > 0)) {
+    return `You haven't harvested anything ${periodLabel}.`;
+  }
+
+  let line = `You've harvested ${speakHarvestQuantity(total, unit)} from the garden ${periodLabel}`;
+  const byCrop = Array.isArray(stats.byCrop) ? stats.byCrop : [];
+  const parts = byCrop
+    .filter((c) => c && Number(c.quantity ?? c.total) > 0)
+    .slice(0, 3)
+    .map(
+      (c) =>
+        `${speakHarvestQuantity(Number(c.quantity ?? c.total), c.unit ?? unit)} of ${c.crop ?? "produce"}`,
+    );
+  if (parts.length) line += `: ${speakList(parts)}`;
+  return `${line}.`;
+}
+
+// Confirmation line after POST /harvest-logs/{id}/publish: the surplus is now
+// listed on the Good Roots Network ("Done. I shared 5 pounds of tomatoes with
+// the Good Roots Network.").
+export function renderSurplusPublished(result) {
+  if (!result || typeof result !== "object") {
+    return "Done. I shared your surplus with the Good Roots Network.";
+  }
+  const crop = result.crop ?? "produce";
+  const quantity = result.quantity;
+  const unit = result.unit ?? "lb";
+  if (quantity == null || !Number.isFinite(Number(quantity))) {
+    return `Done. I shared your ${crop} with the Good Roots Network.`;
+  }
+  return `Done. I shared ${speakHarvestQuantity(quantity, unit)} of ${crop} with the Good Roots Network.`;
+}
+
+// Renders GET /grn/my-listings: the member's surplus listings and whether each
+// has been claimed ("You have 2 listings on the Good Roots Network: 5 pounds of
+// tomatoes, claimed by Maria; and 3 pounds of squash, still available.").
+export function renderGrnListings(payload) {
+  if (!payload || typeof payload !== "object") {
+    return "I couldn't read your Good Roots Network listings right now.";
+  }
+  const listings = Array.isArray(payload.listings)
+    ? payload.listings
+    : Array.isArray(payload)
+      ? payload
+      : [];
+  if (listings.length === 0) {
+    return "You don't have any listings on the Good Roots Network right now.";
+  }
+
+  const parts = listings.slice(0, 3).map((l) => {
+    const crop = l?.crop ?? "produce";
+    const quantity = l?.quantity;
+    const unit = l?.unit ?? "lb";
+    const what =
+      quantity != null && Number.isFinite(Number(quantity))
+        ? `${speakHarvestQuantity(quantity, unit)} of ${crop}`
+        : crop;
+    const claimedBy = l?.claimedBy;
+    const claimed =
+      l?.claimed === true || l?.status === "claimed" || Boolean(claimedBy);
+    if (claimed) {
+      return claimedBy ? `${what}, claimed by ${claimedBy}` : `${what}, claimed`;
+    }
+    return `${what}, still available`;
+  });
+  const remaining = listings.length - parts.length;
+  if (remaining > 0) parts.push(`${pluralize(remaining, "other listing")}`);
+
+  return `You have ${pluralize(listings.length, "listing")} on the Good Roots Network: ${speakList(parts)}.`;
+}
+
+// Renders GET /grn/requests: community needs other members have posted ("The
+// community is looking for 3 things: eggs, fresh herbs, and one more.").
+export function renderGrnRequests(payload) {
+  if (!payload || typeof payload !== "object") {
+    return "I couldn't read the community's requests right now.";
+  }
+  const requests = Array.isArray(payload.requests)
+    ? payload.requests
+    : Array.isArray(payload)
+      ? payload
+      : [];
+  if (requests.length === 0) {
+    return "The community isn't asking for anything right now.";
+  }
+
+  const named = requests.slice(0, 3).map((r) => {
+    const item = r?.item ?? r?.crop ?? r?.produce ?? "something";
+    const who = r?.requestedBy ?? r?.member;
+    return who ? `${item} for ${who}` : item;
+  });
+  const remaining = requests.length - named.length;
+  if (remaining > 0) named.push(`${pluralize(remaining, "more")}`);
+
+  return `The community is looking for ${pluralize(requests.length, "thing")}: ${speakList(named)}.`;
+}
+
 export const __testables = {
   speakList,
   pluralize,
@@ -562,4 +700,5 @@ export const __testables = {
   speakDollars,
   weightAdjective,
   speakVolume,
+  speakHarvestQuantity,
 };

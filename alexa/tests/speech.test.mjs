@@ -17,6 +17,11 @@ import {
   renderCareDue,
   renderUpcomingDue,
   renderPnl,
+  renderHarvestLogged,
+  renderGardenStats,
+  renderSurplusPublished,
+  renderGrnListings,
+  renderGrnRequests,
   __testables,
 } from "../lib/speech.mjs";
 
@@ -474,5 +479,119 @@ describe("renderPnl", () => {
   });
   test("null payload", () => {
     expect(renderPnl(null)).toMatch(/couldn't read your profit and loss/);
+  });
+});
+
+describe("renderHarvestLogged", () => {
+  test("speaks quantity, unit, and crop", () => {
+    expect(
+      renderHarvestLogged({ crop: "tomatoes", quantity: 5, unit: "lb" }),
+    ).toBe("Got it. I logged 5 pounds of tomatoes.");
+  });
+  test("singular and a non-weight unit reads naturally", () => {
+    expect(
+      renderHarvestLogged({ crop: "kale", quantity: 1, unit: "bunch" }),
+    ).toBe("Got it. I logged 1 bunch of kale.");
+  });
+  test("falls back without a quantity", () => {
+    expect(renderHarvestLogged({ crop: "squash" })).toMatch(/squash harvest/);
+    expect(renderHarvestLogged(null)).toMatch(/logged that harvest/);
+  });
+});
+
+describe("renderGardenStats", () => {
+  test("speaks total and a top-crop breakdown", () => {
+    const speech = renderGardenStats({
+      total: 40,
+      unit: "lb",
+      periodLabel: "this month",
+      byCrop: [
+        { crop: "tomatoes", quantity: 18 },
+        { crop: "squash", quantity: 12 },
+      ],
+    });
+    expect(speech).toContain("40 pounds from the garden this month");
+    expect(speech).toContain("18 pounds of tomatoes");
+    expect(speech).toContain("12 pounds of squash");
+  });
+  test("nothing harvested", () => {
+    expect(renderGardenStats({ total: 0 })).toMatch(/haven't harvested anything/);
+  });
+  test("null payload", () => {
+    expect(renderGardenStats(null)).toMatch(/couldn't read your garden stats/);
+  });
+});
+
+describe("renderSurplusPublished", () => {
+  test("confirms what was shared", () => {
+    expect(
+      renderSurplusPublished({ crop: "tomatoes", quantity: 3, unit: "lb" }),
+    ).toBe(
+      "Done. I shared 3 pounds of tomatoes with the Good Roots Network.",
+    );
+  });
+  test("falls back without a quantity", () => {
+    expect(renderSurplusPublished({ crop: "kale" })).toMatch(
+      /shared your kale with the Good Roots Network/,
+    );
+    expect(renderSurplusPublished(null)).toMatch(/shared your surplus/);
+  });
+});
+
+describe("renderGrnListings", () => {
+  test("speaks claim status per listing", () => {
+    const speech = renderGrnListings({
+      listings: [
+        { crop: "tomatoes", quantity: 5, unit: "lb", claimedBy: "Maria" },
+        { crop: "squash", quantity: 3, unit: "lb", status: "available" },
+      ],
+    });
+    expect(speech).toContain("2 listings on the Good Roots Network");
+    expect(speech).toContain("claimed by Maria");
+    expect(speech).toContain("still available");
+  });
+  test("summarizes overflow beyond three", () => {
+    const speech = renderGrnListings({
+      listings: [
+        { crop: "a" },
+        { crop: "b" },
+        { crop: "c" },
+        { crop: "d" },
+      ],
+    });
+    expect(speech).toContain("1 other listing");
+  });
+  test("no listings", () => {
+    expect(renderGrnListings({ listings: [] })).toMatch(
+      /don't have any listings/,
+    );
+  });
+  test("null payload", () => {
+    expect(renderGrnListings(null)).toMatch(
+      /couldn't read your Good Roots Network listings/,
+    );
+  });
+});
+
+describe("renderGrnRequests", () => {
+  test("speaks what the community needs", () => {
+    const speech = renderGrnRequests({
+      requests: [{ item: "eggs" }, { item: "fresh herbs" }],
+    });
+    expect(speech).toContain("2 things");
+    expect(speech).toContain("eggs");
+    expect(speech).toContain("fresh herbs");
+  });
+  test("summarizes overflow beyond three", () => {
+    const speech = renderGrnRequests({
+      requests: [{ item: "a" }, { item: "b" }, { item: "c" }, { item: "d" }],
+    });
+    expect(speech).toContain("1 more");
+  });
+  test("nothing requested", () => {
+    expect(renderGrnRequests({ requests: [] })).toMatch(/isn't asking for anything/);
+  });
+  test("null payload", () => {
+    expect(renderGrnRequests(null)).toMatch(/couldn't read the community's requests/);
   });
 });

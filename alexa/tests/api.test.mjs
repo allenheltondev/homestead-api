@@ -396,4 +396,98 @@ describe("createApiClient", () => {
       "https://api.example.test/v1/stats/pnl?period=this+year",
     );
   });
+
+  // --- Garden pillar + Good Roots Network (GRN) ---------------------------
+
+  test("recordHarvest POSTs crop + quantity to /harvest-logs", async () => {
+    const fetchMock = mockFetch(201, { id: "hv1", crop: "tomatoes", quantity: 5 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.recordHarvest({ crop: "tomatoes", quantity: 5, unit: "lb" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.example.test/v1/harvest-logs");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      crop: "tomatoes",
+      quantity: 5,
+      unit: "lb",
+    });
+  });
+
+  test("getGardenStats GETs /stats/garden with the period query", async () => {
+    const fetchMock = mockFetch(200, { total: 40 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getGardenStats({ period: "this month" });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.example.test/v1/stats/garden?period=this+month",
+    );
+  });
+
+  test("getGardenStats omits the query when no period is given", async () => {
+    const fetchMock = mockFetch(200, { total: 0 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getGardenStats({});
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.example.test/v1/stats/garden",
+    );
+  });
+
+  test("getPlantingCalendar GETs /garden/calendar", async () => {
+    const fetchMock = mockFetch(200, { entries: [] });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getPlantingCalendar();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.example.test/v1/garden/calendar");
+    expect(init.method).toBe("GET");
+  });
+
+  test("publishSurplus POSTs to /harvest-logs/{id}/publish", async () => {
+    const fetchMock = mockFetch(200, { crop: "tomatoes", quantity: 3 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.publishSurplus("hv1", { quantity: 3 });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(
+      "https://api.example.test/v1/harvest-logs/hv1/publish",
+    );
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ quantity: 3 });
+  });
+
+  test("getGrnListings GETs /grn/my-listings", async () => {
+    const fetchMock = mockFetch(200, { listings: [] });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getGrnListings();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.example.test/v1/grn/my-listings");
+    expect(init.method).toBe("GET");
+  });
+
+  test("getGrnRequests GETs /grn/requests", async () => {
+    const fetchMock = mockFetch(200, { requests: [] });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getGrnRequests();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.example.test/v1/grn/requests");
+    expect(init.method).toBe("GET");
+  });
 });

@@ -24,6 +24,11 @@ const getCareDue = jest.fn();
 const completeCareTask = jest.fn();
 const getUpcomingDue = jest.fn();
 const getPnl = jest.fn();
+const recordHarvest = jest.fn();
+const getGardenStats = jest.fn();
+const publishSurplus = jest.fn();
+const getGrnListings = jest.fn();
+const getGrnRequests = jest.fn();
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -62,6 +67,11 @@ jest.unstable_mockModule("../lib/api.mjs", () => ({
     completeCareTask,
     getUpcomingDue,
     getPnl,
+    recordHarvest,
+    getGardenStats,
+    publishSurplus,
+    getGrnListings,
+    getGrnRequests,
   }),
   ApiError,
   MissingTokenError,
@@ -101,6 +111,11 @@ const {
   CompleteCareTaskIntentHandler,
   GetUpcomingDueIntentHandler,
   GetPnlIntentHandler,
+  LogHarvestIntentHandler,
+  GetGardenStatsIntentHandler,
+  ShareSurplusIntentHandler,
+  GetGrnListingsIntentHandler,
+  GetGrnRequestsIntentHandler,
   HelpIntentHandler,
   CancelAndStopIntentHandler,
   FallbackIntentHandler,
@@ -864,6 +879,166 @@ describe("GetPnlIntent", () => {
     getPnl.mockRejectedValue(new MissingTokenError());
     const res = await GetPnlIntentHandler.handle(
       handlerInput(intentRequest("GetPnlIntent")),
+    );
+    expect(res.linkAccount).toBe(true);
+  });
+});
+
+describe("LogHarvestIntent (dialog-delegated write)", () => {
+  test("delegates while the dialog is incomplete", async () => {
+    const res = await LogHarvestIntentHandler.handle(
+      handlerInput(intentRequest("LogHarvestIntent", {}, "IN_PROGRESS")),
+    );
+    expect(res.delegated).toBe(true);
+    expect(recordHarvest).not.toHaveBeenCalled();
+  });
+
+  test("posts crop + quantity when COMPLETED and confirms", async () => {
+    recordHarvest.mockResolvedValue({
+      crop: "tomatoes",
+      quantity: 5,
+      unit: "lb",
+    });
+    const res = await LogHarvestIntentHandler.handle(
+      handlerInput(
+        intentRequest("LogHarvestIntent", {
+          crop: { value: "tomatoes" },
+          quantity: { value: "5" },
+        }),
+        { apl: true },
+      ),
+    );
+    expect(recordHarvest).toHaveBeenCalledWith({
+      crop: "tomatoes",
+      quantity: 5,
+      unit: "lb",
+    });
+    expect(res.delegated).toBe(false);
+    expect(res.speech).toContain("5 pounds of tomatoes");
+    expect(res.directives).toHaveLength(1);
+  });
+
+  test("surfaces auth errors on COMPLETED", async () => {
+    recordHarvest.mockRejectedValue(new MissingTokenError());
+    const res = await LogHarvestIntentHandler.handle(
+      handlerInput(
+        intentRequest("LogHarvestIntent", {
+          crop: { value: "kale" },
+          quantity: { value: "3" },
+        }),
+      ),
+    );
+    expect(res.linkAccount).toBe(true);
+  });
+});
+
+describe("GetGardenStatsIntent", () => {
+  test("calls getGardenStats and speaks the harvest", async () => {
+    getGardenStats.mockResolvedValue({
+      total: 40,
+      unit: "lb",
+      periodLabel: "this month",
+    });
+    const res = await GetGardenStatsIntentHandler.handle(
+      handlerInput(
+        intentRequest("GetGardenStatsIntent", { period: { value: "this month" } }),
+      ),
+    );
+    expect(getGardenStats).toHaveBeenCalledWith({ period: "this month" });
+    expect(res.speech).toContain("40 pounds from the garden this month");
+  });
+
+  test("prompts to link account on a 401", async () => {
+    getGardenStats.mockRejectedValue(new ApiError(401, "Unauthorized"));
+    const res = await GetGardenStatsIntentHandler.handle(
+      handlerInput(intentRequest("GetGardenStatsIntent")),
+    );
+    expect(res.linkAccount).toBe(true);
+  });
+});
+
+describe("ShareSurplusIntent (dialog/confirm-gated write)", () => {
+  test("delegates while the dialog is incomplete", async () => {
+    const res = await ShareSurplusIntentHandler.handle(
+      handlerInput(intentRequest("ShareSurplusIntent", {}, "IN_PROGRESS")),
+    );
+    expect(res.delegated).toBe(true);
+    expect(publishSurplus).not.toHaveBeenCalled();
+  });
+
+  test("publishes the surplus when COMPLETED and confirms", async () => {
+    publishSurplus.mockResolvedValue({
+      crop: "tomatoes",
+      quantity: 3,
+      unit: "lb",
+    });
+    const res = await ShareSurplusIntentHandler.handle(
+      handlerInput(
+        intentRequest("ShareSurplusIntent", {
+          crop: { value: "tomatoes" },
+          quantity: { value: "3" },
+        }),
+        { apl: true },
+      ),
+    );
+    expect(publishSurplus).toHaveBeenCalledWith("tomatoes", { quantity: 3 });
+    expect(res.delegated).toBe(false);
+    expect(res.speech).toContain("Good Roots Network");
+    expect(res.directives).toHaveLength(1);
+  });
+
+  test("surfaces auth errors on COMPLETED", async () => {
+    publishSurplus.mockRejectedValue(new MissingTokenError());
+    const res = await ShareSurplusIntentHandler.handle(
+      handlerInput(
+        intentRequest("ShareSurplusIntent", { crop: { value: "kale" } }),
+      ),
+    );
+    expect(res.linkAccount).toBe(true);
+  });
+});
+
+describe("GetGrnListingsIntent", () => {
+  test("calls getGrnListings and speaks claim status", async () => {
+    getGrnListings.mockResolvedValue({
+      listings: [
+        { crop: "tomatoes", quantity: 5, unit: "lb", claimedBy: "Maria" },
+      ],
+    });
+    const res = await GetGrnListingsIntentHandler.handle(
+      handlerInput(intentRequest("GetGrnListingsIntent")),
+    );
+    expect(getGrnListings).toHaveBeenCalledTimes(1);
+    expect(res.speech).toContain("claimed by Maria");
+  });
+
+  test("speaks a generic error on a 500", async () => {
+    getGrnListings.mockRejectedValue(new ApiError(500, "boom"));
+    const res = await GetGrnListingsIntentHandler.handle(
+      handlerInput(intentRequest("GetGrnListingsIntent")),
+    );
+    expect(res.linkAccount).toBe(false);
+    expect(res.speech).toMatch(/couldn't check your Good Roots Network listings/);
+  });
+});
+
+describe("GetGrnRequestsIntent", () => {
+  test("calls getGrnRequests and speaks the needs", async () => {
+    getGrnRequests.mockResolvedValue({
+      requests: [{ item: "eggs" }, { item: "fresh herbs" }],
+    });
+    const res = await GetGrnRequestsIntentHandler.handle(
+      handlerInput(intentRequest("GetGrnRequestsIntent")),
+    );
+    expect(getGrnRequests).toHaveBeenCalledTimes(1);
+    expect(res.speech).toContain("eggs");
+    expect(res.speech).toContain("fresh herbs");
+  });
+
+  test("prompts to link account on MissingTokenError", async () => {
+    getGrnRequests.mockRejectedValue(new MissingTokenError());
+    const res = await GetGrnRequestsIntentHandler.handle(
+      handlerInput(intentRequest("GetGrnRequestsIntent")),
     );
     expect(res.linkAccount).toBe(true);
   });
