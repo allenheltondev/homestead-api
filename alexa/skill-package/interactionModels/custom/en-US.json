@@ -344,6 +344,108 @@
           ]
         },
         {
+          "name": "LogMilkIntent",
+          "slots": [
+            { "name": "volume", "type": "AMAZON.NUMBER" },
+            { "name": "unit", "type": "AMAZON.SearchQuery" },
+            { "name": "animal", "type": "AMAZON.SearchQuery" },
+            { "name": "date", "type": "AMAZON.DATE" }
+          ],
+          "samples": [
+            "I milked {volume} gallons {date}",
+            "I got {volume} gallons of milk from {animal}",
+            "log {volume} {unit} of milk",
+            "I collected {volume} gallons of milk",
+            "record {volume} gallons of milk from {animal}",
+            "log {volume} gallons of milk {date}",
+            "I milked {animal}",
+            "log a milking",
+            "record a milking",
+            "log milk"
+          ]
+        },
+        {
+          "name": "GetMilkStatsIntent",
+          "slots": [
+            { "name": "period", "type": "AMAZON.SearchQuery" }
+          ],
+          "samples": [
+            "how much milk did I collect {period}",
+            "what are my milk stats {period}",
+            "how is my milk production",
+            "how much milk this month",
+            "milk stats",
+            "milk production"
+          ]
+        },
+        {
+          "name": "GetCareDueIntent",
+          "slots": [
+            { "name": "withinDays", "type": "AMAZON.NUMBER" }
+          ],
+          "samples": [
+            "what care tasks are due",
+            "what's due in the next {withinDays} days",
+            "what care is due",
+            "what do I need to do for my animals",
+            "what's on my care schedule",
+            "what care tasks are coming up",
+            "care tasks due",
+            "what's due soon"
+          ]
+        },
+        {
+          "name": "CompleteCareTaskIntent",
+          "slots": [
+            { "name": "task", "type": "AMAZON.SearchQuery" }
+          ],
+          "samples": [
+            "mark {task} as done",
+            "mark {task} complete",
+            "I finished {task}",
+            "I did {task}",
+            "complete the task {task}",
+            "mark a care task complete",
+            "complete a care task",
+            "I finished a care task"
+          ]
+        },
+        {
+          "name": "GetUpcomingDueIntent",
+          "slots": [
+            { "name": "withinDays", "type": "AMAZON.NUMBER" }
+          ],
+          "samples": [
+            "what's due to hatch or kid",
+            "what's due to hatch",
+            "what's due to give birth",
+            "what's about to be born",
+            "what animals are due",
+            "what's due in the next {withinDays} days to hatch",
+            "what's hatching soon",
+            "who's due to kid or calve",
+            "upcoming births and hatches"
+          ]
+        },
+        {
+          "name": "GetPnlIntent",
+          "slots": [
+            { "name": "period", "type": "AMAZON.SearchQuery" }
+          ],
+          "samples": [
+            "am I in the black",
+            "am I in the red",
+            "what's my homestead profit {period}",
+            "what's my homestead profit this month",
+            "what's my profit and loss {period}",
+            "am I making money",
+            "how is my homestead doing financially",
+            "what's my net income {period}",
+            "homestead profit",
+            "profit and loss"
+          ]
+        },
+        {
           "name": "CatchAllIntent",
           "slots": [
             { "name": "query", "type": "AMAZON.SearchQuery" }
@@ -581,6 +683,52 @@
               "elicitationRequired": false
             }
           ]
+        },
+        {
+          "name": "LogMilkIntent",
+          "confirmationRequired": true,
+          "prompts": { "confirmation": "Confirm.Intent.LogMilk" },
+          "slots": [
+            {
+              "name": "volume",
+              "type": "AMAZON.NUMBER",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.milkVolume" }
+            },
+            {
+              "name": "unit",
+              "type": "AMAZON.SearchQuery",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            },
+            {
+              "name": "animal",
+              "type": "AMAZON.SearchQuery",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            },
+            {
+              "name": "date",
+              "type": "AMAZON.DATE",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            }
+          ]
+        },
+        {
+          "name": "CompleteCareTaskIntent",
+          "confirmationRequired": true,
+          "prompts": { "confirmation": "Confirm.Intent.CompleteCareTask" },
+          "slots": [
+            {
+              "name": "task",
+              "type": "AMAZON.SearchQuery",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.careTask" }
+            }
+          ]
         }
       ]
     },
@@ -697,6 +845,30 @@
         "id": "Confirm.Intent.RecordHealthExpense",
         "variations": [
           { "type": "PlainText", "value": "A {cost} dollar {category} expense. Should I add it?" }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.milkVolume",
+        "variations": [
+          { "type": "PlainText", "value": "How much milk did you collect, in gallons?" }
+        ]
+      },
+      {
+        "id": "Confirm.Intent.LogMilk",
+        "variations": [
+          { "type": "PlainText", "value": "{volume} gallons of milk. Should I log it?" }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.careTask",
+        "variations": [
+          { "type": "PlainText", "value": "Which care task should I mark complete?" }
+        ]
+      },
+      {
+        "id": "Confirm.Intent.CompleteCareTask",
+        "variations": [
+          { "type": "PlainText", "value": "Mark {task} complete. Is that right?" }
         ]
       }
     ]

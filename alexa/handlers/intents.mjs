@@ -22,6 +22,11 @@ import {
   renderHealthStats,
   renderMortality,
   renderDigest,
+  renderMilkLogged,
+  renderMilkStats,
+  renderCareDue,
+  renderUpcomingDue,
+  renderPnl,
 } from "../lib/speech.mjs";
 import {
   buildBirthFields,
@@ -33,6 +38,9 @@ import {
   buildEggCostQuery,
   buildFeedUsageFields,
   buildHealthExpenseFields,
+  buildMilkFields,
+  buildWithinDays,
+  buildCareTaskRef,
   slotValue,
 } from "../lib/slots.mjs";
 import {
@@ -54,7 +62,9 @@ const HELP_TEXT =
   "move animals, log feed you've fed out, ask how much feed you have left, " +
   "ask about your egg stats and cost, record a vet or health expense, " +
   "ask how much you've spent on health, ask about your loss rate, " +
-  "or ask for your weekly homestead digest. " +
+  "ask for your weekly homestead digest, log a milking, ask about your " +
+  "milk production, ask what care tasks are due, mark a care task complete, " +
+  "ask what's due to hatch or give birth, or ask whether you're in the black. " +
   "What would you like to do?";
 
 function getIntentName(handlerInput) {
@@ -472,6 +482,152 @@ export const GetWeeklyDigestIntentHandler = {
   },
 };
 
+// --- Species-smart animals: milk ----------------------------------------
+
+export const LogMilkIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "LogMilkIntent");
+  },
+  async handle(handlerInput) {
+    if (dialogIncomplete(handlerInput)) return delegate(handlerInput);
+
+    const intent = handlerInput.requestEnvelope.request.intent;
+    const fields = buildMilkFields(intent);
+    try {
+      const api = createApiClient(handlerInput);
+      const result = await api.recordMilk(fields);
+      const text = renderMilkLogged(result ?? fields);
+      return addConfirmationScreen(handlerInput, "Milk logged", text)
+        .speak(text)
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't log that milking right now.",
+      );
+    }
+  },
+};
+
+export const GetMilkStatsIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "GetMilkStatsIntent");
+  },
+  async handle(handlerInput) {
+    const intent = handlerInput.requestEnvelope.request.intent;
+    try {
+      const api = createApiClient(handlerInput);
+      const stats = await api.getMilkStats(buildPeriodQuery(intent));
+      return handlerInput.responseBuilder
+        .speak(renderMilkStats(stats))
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't get your milk stats right now.",
+      );
+    }
+  },
+};
+
+// --- Care schedules ------------------------------------------------------
+
+export const GetCareDueIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "GetCareDueIntent");
+  },
+  async handle(handlerInput) {
+    const intent = handlerInput.requestEnvelope.request.intent;
+    try {
+      const api = createApiClient(handlerInput);
+      const due = await api.getCareDue(buildWithinDays(intent));
+      return handlerInput.responseBuilder
+        .speak(renderCareDue(due))
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't get your care schedule right now.",
+      );
+    }
+  },
+};
+
+export const CompleteCareTaskIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "CompleteCareTaskIntent");
+  },
+  async handle(handlerInput) {
+    if (dialogIncomplete(handlerInput)) return delegate(handlerInput);
+
+    const intent = handlerInput.requestEnvelope.request.intent;
+    const task = buildCareTaskRef(intent);
+    try {
+      const api = createApiClient(handlerInput);
+      await api.completeCareTask(task);
+      const text = `Got it. I marked ${task ?? "that task"} complete.`;
+      return addConfirmationScreen(handlerInput, "Care task complete", text)
+        .speak(text)
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't complete that care task right now.",
+      );
+    }
+  },
+};
+
+// --- Breeding / incubation: what's due to hatch or kid -------------------
+
+export const GetUpcomingDueIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "GetUpcomingDueIntent");
+  },
+  async handle(handlerInput) {
+    const intent = handlerInput.requestEnvelope.request.intent;
+    try {
+      const api = createApiClient(handlerInput);
+      const rollup = await api.getUpcomingDue(buildWithinDays(intent));
+      return handlerInput.responseBuilder
+        .speak(renderUpcomingDue(rollup))
+        .getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't check what's coming due right now.",
+      );
+    }
+  },
+};
+
+// --- Homestead P&L -------------------------------------------------------
+
+export const GetPnlIntentHandler = {
+  canHandle(handlerInput) {
+    return isIntent(handlerInput, "GetPnlIntent");
+  },
+  async handle(handlerInput) {
+    const intent = handlerInput.requestEnvelope.request.intent;
+    try {
+      const api = createApiClient(handlerInput);
+      const pnl = await api.getPnl(buildPeriodQuery(intent));
+      return handlerInput.responseBuilder.speak(renderPnl(pnl)).getResponse();
+    } catch (err) {
+      return speakApiError(
+        handlerInput,
+        err,
+        "Sorry, I couldn't get your profit and loss right now.",
+      );
+    }
+  },
+};
+
 export const HelpIntentHandler = {
   canHandle(handlerInput) {
     return isIntent(handlerInput, "AMAZON.HelpIntent");
@@ -650,6 +806,12 @@ export const handlers = [
   GetHealthStatsIntentHandler,
   GetMortalityIntentHandler,
   GetWeeklyDigestIntentHandler,
+  LogMilkIntentHandler,
+  GetMilkStatsIntentHandler,
+  GetCareDueIntentHandler,
+  CompleteCareTaskIntentHandler,
+  GetUpcomingDueIntentHandler,
+  GetPnlIntentHandler,
   HelpIntentHandler,
   CancelAndStopIntentHandler,
   // Yes/No confirm the agent's pending writes — register BEFORE the catch-all

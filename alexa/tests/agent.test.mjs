@@ -57,6 +57,13 @@ const apiClient = {
   recordBirth: jest.fn(),
   moveAnimals: jest.fn(),
   recordHealthExpense: jest.fn(),
+  getMilkStats: jest.fn(),
+  getMilkCost: jest.fn(),
+  getCareDue: jest.fn(),
+  getUpcomingDue: jest.fn(),
+  getPnl: jest.fn(),
+  recordMilk: jest.fn(),
+  completeCareTask: jest.fn(),
 };
 
 jest.unstable_mockModule("../lib/api.mjs", () => ({

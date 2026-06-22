@@ -18,6 +18,12 @@ const recordHealthExpense = jest.fn();
 const getHealthStats = jest.fn();
 const getMortality = jest.fn();
 const getDigest = jest.fn();
+const recordMilk = jest.fn();
+const getMilkStats = jest.fn();
+const getCareDue = jest.fn();
+const completeCareTask = jest.fn();
+const getUpcomingDue = jest.fn();
+const getPnl = jest.fn();
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -50,6 +56,12 @@ jest.unstable_mockModule("../lib/api.mjs", () => ({
     getHealthStats,
     getMortality,
     getDigest,
+    recordMilk,
+    getMilkStats,
+    getCareDue,
+    completeCareTask,
+    getUpcomingDue,
+    getPnl,
   }),
   ApiError,
   MissingTokenError,
@@ -83,6 +95,12 @@ const {
   GetHealthStatsIntentHandler,
   GetMortalityIntentHandler,
   GetWeeklyDigestIntentHandler,
+  LogMilkIntentHandler,
+  GetMilkStatsIntentHandler,
+  GetCareDueIntentHandler,
+  CompleteCareTaskIntentHandler,
+  GetUpcomingDueIntentHandler,
+  GetPnlIntentHandler,
   HelpIntentHandler,
   CancelAndStopIntentHandler,
   FallbackIntentHandler,
@@ -672,6 +690,180 @@ describe("GetFeedInventoryIntent + APL gating", () => {
     getFeedInventory.mockRejectedValue(new ApiError(401, "Unauthorized"));
     const res = await GetFeedInventoryIntentHandler.handle(
       handlerInput(intentRequest("GetFeedInventoryIntent")),
+    );
+    expect(res.linkAccount).toBe(true);
+  });
+});
+
+describe("LogMilkIntent (dialog-delegated write)", () => {
+  test("delegates while the dialog is incomplete", async () => {
+    const res = await LogMilkIntentHandler.handle(
+      handlerInput(intentRequest("LogMilkIntent", {}, "IN_PROGRESS")),
+    );
+    expect(res.delegated).toBe(true);
+    expect(recordMilk).not.toHaveBeenCalled();
+  });
+
+  test("posts volume + unit when COMPLETED and confirms", async () => {
+    recordMilk.mockResolvedValue({ volume: 2, unit: "gal", animal: "Daisy" });
+    const res = await LogMilkIntentHandler.handle(
+      handlerInput(
+        intentRequest("LogMilkIntent", {
+          volume: { value: "2" },
+          animal: { value: "Daisy" },
+        }),
+        { apl: true },
+      ),
+    );
+    expect(recordMilk).toHaveBeenCalledWith({
+      volume: 2,
+      unit: "gal",
+      animal: "Daisy",
+    });
+    expect(res.delegated).toBe(false);
+    expect(res.speech).toContain("2 gallons of milk from Daisy");
+    expect(res.directives).toHaveLength(1);
+  });
+
+  test("surfaces auth errors on COMPLETED", async () => {
+    recordMilk.mockRejectedValue(new MissingTokenError());
+    const res = await LogMilkIntentHandler.handle(
+      handlerInput(
+        intentRequest("LogMilkIntent", { volume: { value: "1" } }),
+      ),
+    );
+    expect(res.linkAccount).toBe(true);
+  });
+});
+
+describe("GetMilkStatsIntent", () => {
+  test("calls getMilkStats and speaks the production", async () => {
+    getMilkStats.mockResolvedValue({
+      total: 14,
+      unit: "gal",
+      perDay: 0.5,
+      periodLabel: "this month",
+    });
+    const res = await GetMilkStatsIntentHandler.handle(
+      handlerInput(
+        intentRequest("GetMilkStatsIntent", { period: { value: "this month" } }),
+      ),
+    );
+    expect(getMilkStats).toHaveBeenCalledWith({ period: "this month" });
+    expect(res.speech).toContain("14 gallons of milk this month");
+  });
+
+  test("prompts to link account on a 401", async () => {
+    getMilkStats.mockRejectedValue(new ApiError(401, "Unauthorized"));
+    const res = await GetMilkStatsIntentHandler.handle(
+      handlerInput(intentRequest("GetMilkStatsIntent")),
+    );
+    expect(res.linkAccount).toBe(true);
+  });
+});
+
+describe("GetCareDueIntent", () => {
+  test("calls getCareDue with the withinDays slot and speaks the tasks", async () => {
+    getCareDue.mockResolvedValue({
+      tasks: [{ name: "deworm the goats", dueDate: "2026-06-26" }],
+    });
+    const res = await GetCareDueIntentHandler.handle(
+      handlerInput(
+        intentRequest("GetCareDueIntent", { withinDays: { value: "7" } }),
+      ),
+    );
+    expect(getCareDue).toHaveBeenCalledWith(7);
+    expect(res.speech).toContain("deworm the goats");
+  });
+
+  test("omits the window when no slot is given", async () => {
+    getCareDue.mockResolvedValue({ tasks: [] });
+    await GetCareDueIntentHandler.handle(
+      handlerInput(intentRequest("GetCareDueIntent")),
+    );
+    expect(getCareDue).toHaveBeenCalledWith(undefined);
+  });
+});
+
+describe("CompleteCareTaskIntent (dialog-delegated write)", () => {
+  test("delegates while the dialog is incomplete", async () => {
+    const res = await CompleteCareTaskIntentHandler.handle(
+      handlerInput(intentRequest("CompleteCareTaskIntent", {}, "IN_PROGRESS")),
+    );
+    expect(res.delegated).toBe(true);
+    expect(completeCareTask).not.toHaveBeenCalled();
+  });
+
+  test("completes the named task when COMPLETED and confirms", async () => {
+    completeCareTask.mockResolvedValue(null);
+    const res = await CompleteCareTaskIntentHandler.handle(
+      handlerInput(
+        intentRequest("CompleteCareTaskIntent", {
+          task: { value: "deworm the goats" },
+        }),
+      ),
+    );
+    expect(completeCareTask).toHaveBeenCalledWith("deworm the goats");
+    expect(res.delegated).toBe(false);
+    expect(res.speech).toContain("deworm the goats");
+  });
+
+  test("surfaces auth errors on COMPLETED", async () => {
+    completeCareTask.mockRejectedValue(new MissingTokenError());
+    const res = await CompleteCareTaskIntentHandler.handle(
+      handlerInput(
+        intentRequest("CompleteCareTaskIntent", { task: { value: "trim hooves" } }),
+      ),
+    );
+    expect(res.linkAccount).toBe(true);
+  });
+});
+
+describe("GetUpcomingDueIntent", () => {
+  test("calls getUpcomingDue and speaks births + hatches", async () => {
+    getUpcomingDue.mockResolvedValue({
+      breeding: { upcoming: [{ dam: "Daisy", event: "kidding", dueDate: "2026-07-01" }] },
+      incubation: { batches: [{ species: "chicken", eggCount: 12, hatchDate: "2026-06-30" }] },
+    });
+    const res = await GetUpcomingDueIntentHandler.handle(
+      handlerInput(intentRequest("GetUpcomingDueIntent")),
+    );
+    expect(getUpcomingDue).toHaveBeenCalledWith(undefined);
+    expect(res.speech).toContain("Daisy");
+    expect(res.speech).toContain("In the incubator");
+  });
+
+  test("speaks a generic error on a 500", async () => {
+    getUpcomingDue.mockRejectedValue(new ApiError(500, "boom"));
+    const res = await GetUpcomingDueIntentHandler.handle(
+      handlerInput(intentRequest("GetUpcomingDueIntent")),
+    );
+    expect(res.linkAccount).toBe(false);
+    expect(res.speech).toMatch(/couldn't check what's coming due/);
+  });
+});
+
+describe("GetPnlIntent", () => {
+  test("calls getPnl and speaks the verdict", async () => {
+    getPnl.mockResolvedValue({
+      income: 400,
+      expenses: 250,
+      net: 150,
+      periodLabel: "this month",
+    });
+    const res = await GetPnlIntentHandler.handle(
+      handlerInput(
+        intentRequest("GetPnlIntent", { period: { value: "this month" } }),
+      ),
+    );
+    expect(getPnl).toHaveBeenCalledWith({ period: "this month" });
+    expect(res.speech).toContain("in the black by 150 dollars");
+  });
+
+  test("prompts to link account on MissingTokenError", async () => {
+    getPnl.mockRejectedValue(new MissingTokenError());
+    const res = await GetPnlIntentHandler.handle(
+      handlerInput(intentRequest("GetPnlIntent")),
     );
     expect(res.linkAccount).toBe(true);
   });

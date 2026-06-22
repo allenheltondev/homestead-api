@@ -277,4 +277,123 @@ describe("createApiClient", () => {
     expect(new ApiError(500, "x").status).toBe(500);
     expect(new MissingTokenError().name).toBe("MissingTokenError");
   });
+
+  // --- New feature bundles ------------------------------------------------
+
+  test("recordMilk POSTs volume + unit to /milk-logs", async () => {
+    const fetchMock = mockFetch(201, { id: "m1", volume: 2, unit: "gal" });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.recordMilk({ volume: 2, unit: "gal", animal: "Daisy" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.example.test/v1/milk-logs");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      volume: 2,
+      unit: "gal",
+      animal: "Daisy",
+    });
+  });
+
+  test("getMilkStats GETs /stats/milk with the period query", async () => {
+    const fetchMock = mockFetch(200, { total: 14 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getMilkStats({ period: "this month" });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.example.test/v1/stats/milk?period=this+month",
+    );
+  });
+
+  test("getMilkCost GETs /stats/milk-cost", async () => {
+    const fetchMock = mockFetch(200, { costPerGallon: 3 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getMilkCost({});
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.example.test/v1/stats/milk-cost",
+    );
+  });
+
+  test("getCareDue GETs /stats/care/due with a withinDays filter", async () => {
+    const fetchMock = mockFetch(200, { tasks: [] });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getCareDue(7);
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.example.test/v1/stats/care/due?withinDays=7",
+    );
+  });
+
+  test("getCareDue omits the query when no withinDays is given", async () => {
+    const fetchMock = mockFetch(200, { tasks: [] });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getCareDue();
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.example.test/v1/stats/care/due",
+    );
+  });
+
+  test("completeCareTask POSTs to /care-tasks/{id}/complete", async () => {
+    const fetchMock = mockFetch(200, { ok: true });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.completeCareTask("task-42");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(
+      "https://api.example.test/v1/care-tasks/task-42/complete",
+    );
+    expect(init.method).toBe("POST");
+  });
+
+  test("getUpcomingDue fans out to breeding + incubation", async () => {
+    const fetchMock = jest.fn(async (url) => {
+      const body = url.includes("breeding")
+        ? { upcoming: [{ dam: "Daisy" }] }
+        : { batches: [{ species: "chicken" }] };
+      return {
+        status: 200,
+        ok: true,
+        text: async () => JSON.stringify(body),
+      };
+    });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    const result = await api.getUpcomingDue(14);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const urls = fetchMock.mock.calls.map((c) => c[0]);
+    expect(urls).toContain(
+      "https://api.example.test/v1/stats/breeding/upcoming?withinDays=14",
+    );
+    expect(urls).toContain("https://api.example.test/v1/stats/incubation");
+    expect(result.breeding.upcoming).toHaveLength(1);
+    expect(result.incubation.batches).toHaveLength(1);
+  });
+
+  test("getPnl GETs /stats/pnl with the period query", async () => {
+    const fetchMock = mockFetch(200, { net: 150 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.getPnl({ period: "this year" });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api.example.test/v1/stats/pnl?period=this+year",
+    );
+  });
 });

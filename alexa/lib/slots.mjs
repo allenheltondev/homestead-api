@@ -238,4 +238,70 @@ export function buildHealthExpenseFields(intent) {
   return fields;
 }
 
-export const __testables = { normalizeUnit, parseCount };
+// Volume units the milk API accepts. Spoken synonyms map onto the canonical
+// token. Kept separate from feed UNIT_SYNONYMS since milk is liquid volume.
+const MILK_UNIT_SYNONYMS = {
+  gallon: "gal",
+  gallons: "gal",
+  gal: "gal",
+  quart: "qt",
+  quarts: "qt",
+  qt: "qt",
+  pint: "pt",
+  pints: "pt",
+  pt: "pt",
+  liter: "l",
+  liters: "l",
+  litre: "l",
+  litres: "l",
+  l: "l",
+  ounce: "oz",
+  ounces: "oz",
+  oz: "oz",
+  cup: "cup",
+  cups: "cup",
+};
+
+function normalizeMilkUnit(raw) {
+  if (typeof raw !== "string") return undefined;
+  return MILK_UNIT_SYNONYMS[raw.trim().toLowerCase()];
+}
+
+// Builds the POST /milk-logs body for the dialog-delegated LogMilkIntent.
+// Volume is the required slot (guaranteed by the dialog on COMPLETED); the
+// unit defaults to gallons, and the animal and date are optional.
+export function buildMilkFields(intent) {
+  const volume = parseCount(slotValue(intent, "volume"));
+  const unit = normalizeMilkUnit(slotValue(intent, "unit")) ?? "gal";
+
+  const fields = {};
+  if (Number.isFinite(volume)) {
+    fields.volume = volume;
+    fields.unit = unit;
+  }
+
+  const animal = textSlot(intent, "animal");
+  if (animal) fields.animal = animal;
+
+  const date = slotValue(intent, "date");
+  if (isIsoDate(date)) fields.date = date.trim();
+
+  return fields;
+}
+
+// Reads an optional integer "within days" slot used by the care-due and
+// upcoming-due read intents. Returns the number when a sane positive integer
+// was spoken, else undefined so the API applies its default window.
+export function buildWithinDays(intent) {
+  const raw = parseCount(slotValue(intent, "withinDays"));
+  if (Number.isFinite(raw) && raw > 0) return Math.round(raw);
+  return undefined;
+}
+
+// Reads the care task the user named for CompleteCareTaskIntent. Returns the
+// trimmed task name/id string, or undefined when no task slot was filled.
+export function buildCareTaskRef(intent) {
+  return textSlot(intent, "task");
+}
+
+export const __testables = { normalizeUnit, parseCount, normalizeMilkUnit };

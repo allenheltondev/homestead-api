@@ -363,10 +363,203 @@ export function renderDigest(digest) {
   return `${intro}. ${lines.map((l) => l.trim()).join(" ")}`;
 }
 
+// Speaks a milk-volume unit token as a natural noun ("gal" -> "gallon").
+const MILK_UNIT_WORDS = {
+  gal: "gallon",
+  qt: "quart",
+  pt: "pint",
+  l: "liter",
+  oz: "ounce",
+  cup: "cup",
+};
+
+function speakVolume(volume, unit) {
+  const noun = MILK_UNIT_WORDS[unit] ?? unit ?? "gallon";
+  return pluralize(Number(volume) || 0, noun);
+}
+
+// Confirmation line after POST /milk-logs ("Got it. I logged 2 gallons of
+// milk from Daisy.").
+export function renderMilkLogged(result) {
+  if (!result || typeof result !== "object") {
+    return "Got it. I logged that milking.";
+  }
+  const volume = result.volume;
+  const unit = result.unit ?? "gal";
+  if (volume == null || !Number.isFinite(Number(volume))) {
+    return "Got it. I logged that milking.";
+  }
+  const animal = result.animal;
+  const from = animal ? ` from ${animal}` : "";
+  return `Got it. I logged ${speakVolume(volume, unit)} of milk${from}.`;
+}
+
+// Renders GET /stats/milk: total volume over the period and a rough per-day
+// rate ("You collected 14 gallons of milk this month, about half a gallon a
+// day."). Also speaks an optional cost-per-gallon vs store comparison when the
+// payload carries it (e.g. from getMilkCost).
+export function renderMilkStats(stats) {
+  if (!stats || typeof stats !== "object") {
+    return "I couldn't read your milk stats right now.";
+  }
+  const unit = stats.unit ?? "gal";
+  const total = Number(stats.total ?? stats.volume ?? 0) || 0;
+  const periodLabel = stats.periodLabel ?? "this month";
+  if (!(total > 0)) {
+    return `You haven't collected any milk ${periodLabel}.`;
+  }
+
+  const parts = [`You collected ${speakVolume(total, unit)} of milk ${periodLabel}`];
+  const perDay = stats.perDay;
+  if (perDay != null && Number.isFinite(Number(perDay))) {
+    const rounded = Math.round(Number(perDay) * 10) / 10;
+    parts.push(`about ${speakVolume(rounded, unit)} a day`);
+  }
+
+  let line = parts.join(", ");
+  const perGallon = Number(stats.costPerGallon ?? stats.costPerUnit);
+  if (Number.isFinite(perGallon)) {
+    const storePrice = Number(stats.storePricePerGallon);
+    line += `. Your milk costs about ${speakDollars(perGallon)} a gallon`;
+    if (Number.isFinite(storePrice)) {
+      if (perGallon < storePrice) {
+        line += ` — cheaper than the ${speakDollars(storePrice)} store price`;
+      } else if (perGallon > storePrice) {
+        line += ` — more expensive than the ${speakDollars(storePrice)} store price`;
+      } else {
+        line += ` — the same as the ${speakDollars(storePrice)} store price`;
+      }
+    }
+  }
+  return `${line}.`;
+}
+
+// Speaks an ISO date as a short natural phrase ("Friday, July 3rd" style),
+// falling back to the raw value. Shared by the due renderers.
+function speakDate(value) {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const parsed = new Date(`${value.trim()}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return value.trim();
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(parsed);
+}
+
+// Renders GET /stats/care/due: the care tasks coming due. Lists up to a few by
+// name + due date, then summarizes the rest ("You have 3 care tasks due soon:
+// deworm the goats on Friday, trim hooves on Saturday, and one more.").
+export function renderCareDue(due) {
+  if (!due || typeof due !== "object") {
+    return "I couldn't read your care schedule right now.";
+  }
+  const tasks = Array.isArray(due.tasks)
+    ? due.tasks
+    : Array.isArray(due)
+      ? due
+      : [];
+  if (tasks.length === 0) {
+    return "You don't have any care tasks coming due. Nice work.";
+  }
+
+  const named = tasks.slice(0, 3).map((t) => {
+    const name = t?.name ?? t?.task ?? "a task";
+    const when = speakDate(t?.dueDate ?? t?.due);
+    return when ? `${name} on ${when}` : name;
+  });
+  const remaining = tasks.length - named.length;
+  if (remaining > 0) {
+    named.push(`${pluralize(remaining, "other task")}`);
+  }
+  const count = pluralize(tasks.length, "care task");
+  return `You have ${count} coming due: ${speakList(named)}.`;
+}
+
+// Renders the combined getUpcomingDue rollup ({ breeding, incubation }): what's
+// due to kid/calve and what's due to hatch. Speaks each section when present
+// and a cheerful nothing-due line otherwise.
+export function renderUpcomingDue(rollup) {
+  if (!rollup || typeof rollup !== "object") {
+    return "I couldn't check what's coming due right now.";
+  }
+  const breeding = rollup.breeding ?? {};
+  const incubation = rollup.incubation ?? {};
+  const births = Array.isArray(breeding.upcoming)
+    ? breeding.upcoming
+    : Array.isArray(breeding)
+      ? breeding
+      : [];
+  const hatches = Array.isArray(incubation.batches)
+    ? incubation.batches
+    : Array.isArray(incubation)
+      ? incubation
+      : [];
+
+  const sentences = [];
+  if (births.length > 0) {
+    const parts = births.slice(0, 3).map((b) => {
+      const who = b?.dam ?? b?.animal ?? b?.species ?? "an animal";
+      const kind = b?.event ?? b?.type ?? "due";
+      const when = speakDate(b?.dueDate ?? b?.due);
+      return when ? `${who} ${kind} around ${when}` : `${who} ${kind}`;
+    });
+    sentences.push(
+      `${pluralize(births.length, "animal")} due to give birth: ${speakList(parts)}.`,
+    );
+  }
+  if (hatches.length > 0) {
+    const parts = hatches.slice(0, 3).map((h) => {
+      const species = h?.species ?? "eggs";
+      const when = speakDate(h?.hatchDate ?? h?.due);
+      const eggs = h?.eggCount != null ? `${pluralize(h.eggCount, `${species} egg`)}` : species;
+      return when ? `${eggs} hatching around ${when}` : `${eggs} hatching`;
+    });
+    sentences.push(`In the incubator: ${speakList(parts)}.`);
+  }
+
+  if (sentences.length === 0) {
+    return "Nothing is due to hatch or give birth soon.";
+  }
+  return sentences.join(" ");
+}
+
+// Renders GET /stats/pnl: income, expenses, and net for the period, with a
+// black/red verdict ("This month you brought in 400 dollars and spent 250
+// dollars, so you're in the black by 150 dollars.").
+export function renderPnl(pnl) {
+  if (!pnl || typeof pnl !== "object") {
+    return "I couldn't read your profit and loss right now.";
+  }
+  const income = Number(pnl.income ?? pnl.revenue ?? 0) || 0;
+  const expenses = Number(pnl.expenses ?? pnl.costs ?? 0) || 0;
+  const net =
+    pnl.net != null && Number.isFinite(Number(pnl.net))
+      ? Number(pnl.net)
+      : income - expenses;
+  const periodLabel = pnl.periodLabel ?? "this month";
+
+  const base = `${capitalizeFirst(periodLabel)} you brought in ${speakMoney(income)} and spent ${speakMoney(expenses)}`;
+  if (net > 0) {
+    return `${base}, so you're in the black by ${speakMoney(net)}.`;
+  }
+  if (net < 0) {
+    return `${base}, so you're in the red by ${speakMoney(Math.abs(net))}.`;
+  }
+  return `${base}, so you broke even.`;
+}
+
+function capitalizeFirst(text) {
+  const s = String(text ?? "");
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
 export const __testables = {
   speakList,
   pluralize,
   speakMoney,
   speakDollars,
   weightAdjective,
+  speakVolume,
 };
