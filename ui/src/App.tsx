@@ -63,6 +63,9 @@ function NavItems({
       <NavLink to="/pnl" className={className} onClick={onNavigate}>
         P&amp;L
       </NavLink>
+      <NavLink to="/copilot" className={className} onClick={onNavigate}>
+        Copilot
+      </NavLink>
     </>
   );
 }

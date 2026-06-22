@@ -8,6 +8,28 @@ export type AnimalSex = 'female' | 'male' | 'unknown';
 export const FEED_UNITS = ['lb', 'kg', 'ton', 'bag', 'bale', 'flake'] as const;
 export type FeedUnit = (typeof FEED_UNITS)[number];
 
+// --- Copilot ------------------------------------------------------------
+
+// A single turn in the farm-copilot conversation. State is held client-side
+// and the full history is replayed to POST /copilot on every turn.
+export interface CopilotMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+// A tool the copilot consulted while answering, surfaced for transparency.
+export interface CopilotToolUse {
+  name: string;
+  input: Record<string, unknown>;
+}
+
+// POST /copilot response: one assistant reply per turn (non-streaming), plus
+// the optional list of tools the copilot consulted to produce it.
+export interface CopilotResponse {
+  reply: string;
+  toolsUsed?: CopilotToolUse[];
+}
+
 // --- Animals ------------------------------------------------------------
 
 export interface Animal {
