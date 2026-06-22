@@ -81,7 +81,8 @@ jobs:
               "UserPoolId=${{ vars.USER_POOL_ID }}" \
               "UserPoolClientId=${{ vars.USER_POOL_CLIENT_ID }}" \
               "BaseCustomDomain=${{ vars.BASE_CUSTOM_DOMAIN }}" \
-              "HostedZoneId=${{ vars.HOSTED_ZONE_ID }}"
+              "HostedZoneId=${{ vars.HOSTED_ZONE_ID }}" \
+              "GrnApiBaseUrl=${{ vars.GRN_API_BASE_URL }}"
 
       - name: Read stack outputs
         id: outputs

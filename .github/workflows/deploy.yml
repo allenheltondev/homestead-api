@@ -35,6 +35,13 @@ jobs:
     environment:
       name: Staging
       url: ${{ steps.outputs.outputs.dashboard-url }}
+    # Mapped to job-level env so the integration-test step can gate on
+    # their presence (secrets can't be read directly in an `if:`). The
+    # first deploy works before a Cognito test user exists; the test step
+    # just no-ops until TEST_USERNAME/TEST_PASSWORD are set.
+    env:
+      TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
+      TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
 
     steps:
       - name: Checkout
@@ -85,7 +92,8 @@ jobs:
             --parameter-overrides \
               "Environment=${{ env.ENVIRONMENT }}" \
               "UserPoolId=${{ vars.USER_POOL_ID }}" \
-              "UserPoolClientId=${{ vars.USER_POOL_CLIENT_ID }}"
+              "UserPoolClientId=${{ vars.USER_POOL_CLIENT_ID }}" \
+              "GrnApiBaseUrl=${{ vars.GRN_API_BASE_URL }}"
 
       - name: Read stack outputs
         id: outputs
@@ -108,13 +116,18 @@ jobs:
 
       - name: Integration tests
         # Runs against the just-deployed staging stack. A real Cognito id
-        # token is minted by the test client from the env below.
+        # token is minted by the test client from the env below. Skipped
+        # (not failed) until TEST_USERNAME/TEST_PASSWORD secrets are set in
+        # the Staging environment, so the infra deploy can go green first.
+        if: ${{ env.TEST_USERNAME != '' }}
         env:
           STAGE_API_URL: ${{ steps.outputs.outputs.api-url }}
           USER_POOL_CLIENT_ID: ${{ vars.USER_POOL_CLIENT_ID }}
-          TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
-          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
         run: npm run test:integration
+
+      - name: Note skipped integration tests
+        if: ${{ env.TEST_USERNAME == '' }}
+        run: echo "::notice::Integration tests skipped — set TEST_USERNAME and TEST_PASSWORD secrets in the Staging environment to run them against the deployed stack."
 
       - name: Install dashboard dependencies
         # Guarded so the step no-ops until the ui/ app exists.
