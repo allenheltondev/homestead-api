@@ -1231,6 +1231,135 @@ export async function growoutStats(months) {
   return out;
 }
 
+// --- Garden / harvest analytics ----------------------------------------
+// Harvest logs partition by month on the base table (pk = HARVEST#<yyyy-mm>).
+// We Query each month in the period and aggregate quantity by crop, plus a
+// yield-per-bed rollup (joining each log's plantingId -> bedId via the
+// plantings collection). Weight units (lb/oz) normalize to pounds; count
+// units (each/bunch) are summed separately so the byCrop totals stay honest.
+// All reads Query known month / collection partitions -- no Scans.
+
+// Conversion to pounds for the weight units. Count units (each/bunch) are not
+// weights, so they are tracked under `countByCrop` instead of `totalLbs`.
+const HARVEST_LBS_PER = {
+  lb: 1,
+  oz: 1 / 16,
+};
+
+function harvestLbs(quantity, unit) {
+  const factor = HARVEST_LBS_PER[unit];
+  if (factor === undefined) return 0;
+  return (Number(quantity) || 0) * factor;
+}
+
+// Queries every HARVEST#<yyyy-mm> partition in the months list (no Scan) and
+// returns the flat list of log rows.
+async function harvestLogsForMonths(months) {
+  const batches = await Promise.all(
+    months.map((month) =>
+      queryAll({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": `HARVEST#${month}`,
+          ":sk": "LOG#",
+        },
+      }),
+    ),
+  );
+  return batches.flat();
+}
+
+// Lists every planting (collection-partition GSI, gsi1pk = PLANTING) so each
+// harvest log's plantingId can be resolved to a bedId for the per-bed yield.
+// No Scan.
+async function plantingsForYield() {
+  return queryAll({
+    TableName: TABLE_NAME,
+    IndexName: "GSI1",
+    KeyConditionExpression: "gsi1pk = :pk",
+    ExpressionAttributeValues: { ":pk": "PLANTING" },
+  });
+}
+
+// Lists every bed (collection-partition GSI, gsi1pk = BED) so a per-bed yield
+// row can carry the bed name. No Scan.
+async function bedsForYield() {
+  return queryAll({
+    TableName: TABLE_NAME,
+    IndexName: "GSI1",
+    KeyConditionExpression: "gsi1pk = :pk",
+    ExpressionAttributeValues: { ":pk": "BED" },
+  });
+}
+
+// GET /stats/garden — harvest totals by crop (pounds + counts) and a
+// yield-per-bed breakdown for the period.
+export async function gardenStats(period, months) {
+  const [logs, plantings, beds] = await Promise.all([
+    harvestLogsForMonths(months),
+    plantingsForYield(),
+    bedsForYield(),
+  ]);
+
+  // plantingId -> bedId, and bedId -> bed name, for the per-bed rollup.
+  const bedByPlanting = {};
+  for (const p of plantings) {
+    if (p.id) bedByPlanting[p.id] = p.bedId ?? null;
+  }
+  const bedName = {};
+  for (const b of beds) {
+    if (b.id) bedName[b.id] = b.name ?? null;
+  }
+
+  const byCropMap = {};
+  const byBedMap = {};
+  let totalLbs = 0;
+
+  for (const log of logs) {
+    const crop = typeof log.cropName === "string" && log.cropName.length > 0
+      ? log.cropName
+      : "unknown";
+    const lbs = harvestLbs(log.quantity, log.unit);
+    const isCount = log.unit === "each" || log.unit === "bunch";
+
+    if (!byCropMap[crop]) byCropMap[crop] = { lbs: 0, count: 0 };
+    byCropMap[crop].lbs += lbs;
+    if (isCount) byCropMap[crop].count += Number(log.quantity) || 0;
+    totalLbs += lbs;
+
+    // Per-bed yield: resolve the log's planting -> bed; logs with no planting
+    // (or a planting with no bed) roll up under "unassigned".
+    const bedId = log.plantingId ? bedByPlanting[log.plantingId] ?? null : null;
+    const bedKey = bedId ?? "unassigned";
+    if (!byBedMap[bedKey]) byBedMap[bedKey] = { bedId, lbs: 0 };
+    byBedMap[bedKey].lbs += lbs;
+  }
+
+  const byCrop = Object.entries(byCropMap)
+    .map(([cropName, v]) => ({ cropName, lbs: v.lbs, count: v.count }))
+    .sort((a, b) => b.lbs - a.lbs || a.cropName.localeCompare(b.cropName));
+
+  const yieldByBed = Object.values(byBedMap)
+    .map((v) => ({
+      bedId: v.bedId,
+      name: v.bedId ? bedName[v.bedId] ?? null : null,
+      lbs: v.lbs,
+    }))
+    .sort((a, b) => b.lbs - a.lbs);
+
+  return { period, totalLbs, byCrop, yieldByBed };
+}
+
+// Resolve the produce price per pound: explicit override wins, else the
+// PRODUCE_PRICE_PER_LB env var, else 0 (so the P&L produce tie-in defaults off
+// and prior behavior is preserved when unset).
+export function resolveProducePricePerLb(override) {
+  if (override !== undefined && override !== null) return override;
+  const fromEnv = parseFloat(process.env.PRODUCE_PRICE_PER_LB);
+  return Number.isFinite(fromEnv) ? fromEnv : 0;
+}
+
 // --- P&L ----------------------------------------------------------------
 // Composes costs (feed + health spend) and outputs (egg/milk/meat value +
 // actual sales) into a homestead profit & loss for the period.
@@ -1246,15 +1375,17 @@ export async function pnlStats(period, months, options = {}) {
     storePricePerDozen,
     milkPricePerGallon,
     meatPricePerLb,
+    producePricePerLb,
   } = options;
 
-  const [feed, health, eggs, milk, growout, salesRevenue] = await Promise.all([
+  const [feed, health, eggs, milk, growout, salesRevenue, garden] = await Promise.all([
     feedStats(months),
     healthStats(period, months),
     eggStats(months),
     milkStats(period, months),
     growoutStats(),
     salesRevenueForMonths(months),
+    gardenStats(period, months),
   ]);
 
   const feedSpend = feed.totalCost;
@@ -1264,12 +1395,17 @@ export async function pnlStats(period, months, options = {}) {
   const eggPrice = resolveStorePricePerDozen(storePricePerDozen);
   const milkPrice = resolveMilkPricePerGallon(milkPricePerGallon);
   const meatPrice = resolveMeatPricePerLb(meatPricePerLb);
+  // Defaults to 0 when neither the param nor PRODUCE_PRICE_PER_LB is set, so
+  // produceValue is 0 and prior P&L behavior is preserved out of the box.
+  const producePrice = resolveProducePricePerLb(producePricePerLb);
 
   const eggsValue = eggs.dozens * eggPrice;
   const milkValue = milk.totalGallons * milkPrice;
   const meatValue = growout.dressedWeightLbsTotal * meatPrice;
+  // Garden produce valued at harvest pounds x the produce price (0 by default).
+  const produceValue = garden.totalLbs * producePrice;
 
-  const outputs = eggsValue + milkValue + meatValue + salesRevenue;
+  const outputs = eggsValue + milkValue + meatValue + produceValue + salesRevenue;
   const net = outputs - costs;
 
   return {
@@ -1284,12 +1420,14 @@ export async function pnlStats(period, months, options = {}) {
       eggsValue,
       milkValue,
       meatValue,
+      produceValue,
       salesRevenue,
     },
     prices: {
       storeEggPricePerDozen: eggPrice,
       milkPricePerGallon: milkPrice,
       meatPricePerLb: meatPrice,
+      producePricePerLb: producePrice,
     },
     net,
   };

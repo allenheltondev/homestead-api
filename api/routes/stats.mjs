@@ -192,6 +192,7 @@ export function registerStatsRoutes(app) {
       storePricePerDozen: parseStorePrice(event),
       milkPricePerGallon: parsePrice(event, "milkPricePerGallon"),
       meatPricePerLb: parsePrice(event, "meatPricePerLb"),
+      producePricePerLb: parsePrice(event, "producePricePerLb"),
     };
     return jsonResponse(200, await pnlStats(period, months, options));
   });

@@ -47,3 +47,26 @@ export class UpstreamError extends ApiError {
     this.upstreamStatus = upstreamStatus;
   }
 }
+
+// --- Good Roots Network (GRN) integration errors ------------------------
+// GRN is an optional outbound integration: it is only reachable when a base
+// URL + an SSM-stored bearer token are configured. These typed errors let the
+// GRN client + routes signal the three distinct failure modes cleanly.
+
+// The GRN integration is not configured (missing base URL or token). Surfaced
+// as a 503 so callers can tell "not wired up" apart from a real upstream error.
+export class GrnNotConfiguredError extends ApiError {
+  constructor(message = "Good Roots Network integration is not configured") {
+    super(503, message, "GrnNotConfigured");
+  }
+}
+
+// GRN rejected our credentials (upstream 401/403). Surfaced as a 502 (an
+// upstream/config problem on our side, not the caller's) carrying the upstream
+// status for diagnostics.
+export class GrnUnauthorizedError extends ApiError {
+  constructor(upstreamStatus, message = "Good Roots Network rejected the request credentials") {
+    super(502, message, "GrnUnauthorized");
+    this.upstreamStatus = upstreamStatus;
+  }
+}
