@@ -440,18 +440,6 @@ describe("createApiClient", () => {
     );
   });
 
-  test("getPlantingCalendar GETs /garden/calendar", async () => {
-    const fetchMock = mockFetch(200, { entries: [] });
-    global.fetch = fetchMock;
-
-    const api = createApiClient(handlerInputWithToken("tok-abc"));
-    await api.getPlantingCalendar();
-
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://api.example.test/v1/garden/calendar");
-    expect(init.method).toBe("GET");
-  });
-
   test("publishSurplus POSTs to /harvest-logs/{id}/publish", async () => {
     const fetchMock = mockFetch(200, { crop: "tomatoes", quantity: 3 });
     global.fetch = fetchMock;

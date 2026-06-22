@@ -214,8 +214,6 @@ export function createApiClient(handlerInput) {
     // GET /stats/garden — garden harvest stats for an optional period.
     getGardenStats: (query) =>
       request(token, "GET", joinQuery("/stats/garden", query)),
-    // GET /garden/calendar — the planting/sowing calendar for the homestead.
-    getPlantingCalendar: () => request(token, "GET", "/garden/calendar"),
     // POST /harvest-logs/{id}/publish — share surplus from a harvest log to
     // the Good Roots Network as a listing other members can claim.
     publishSurplus: (id, fields) =>

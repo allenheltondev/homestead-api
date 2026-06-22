@@ -29,7 +29,6 @@ describe("tool specs", () => {
   test("adds the garden + GRN tools", () => {
     for (const name of [
       "get_garden_stats",
-      "get_planting_calendar",
       "get_grn_listings",
       "get_grn_requests",
       "log_harvest",
@@ -42,7 +41,6 @@ describe("tool specs", () => {
 
   test("get_* garden/GRN tools are read, log_harvest/publish_surplus are write", () => {
     expect(REGISTRY.get_garden_stats.kind).toBe("read");
-    expect(REGISTRY.get_planting_calendar.kind).toBe("read");
     expect(REGISTRY.get_grn_listings.kind).toBe("read");
     expect(REGISTRY.get_grn_requests.kind).toBe("read");
     expect(REGISTRY.log_harvest.kind).toBe("write");
@@ -54,14 +52,11 @@ describe("garden/GRN runners", () => {
   test("read runners call the matching api method", async () => {
     const api = {
       getGardenStats: jest.fn().mockResolvedValue({ total: 1 }),
-      getPlantingCalendar: jest.fn().mockResolvedValue({ entries: [] }),
       getGrnListings: jest.fn().mockResolvedValue({ listings: [] }),
       getGrnRequests: jest.fn().mockResolvedValue({ requests: [] }),
     };
     await REGISTRY.get_garden_stats.run({ period: "this month" }, api);
     expect(api.getGardenStats).toHaveBeenCalledWith({ period: "this month" });
-    await REGISTRY.get_planting_calendar.run({}, api);
-    expect(api.getPlantingCalendar).toHaveBeenCalledTimes(1);
     await REGISTRY.get_grn_listings.run({}, api);
     expect(api.getGrnListings).toHaveBeenCalledTimes(1);
     await REGISTRY.get_grn_requests.run({}, api);
