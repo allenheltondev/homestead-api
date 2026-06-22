@@ -15,6 +15,7 @@ import { getPnl } from '../api/stats';
 import { createSale, deleteSale, listSales } from '../api/sales';
 import type { CreateSaleRequest, PnlStats, Sale } from '../api/types';
 import Modal from '../components/Modal';
+import PageHeader from '../components/PageHeader';
 import { formatMoney, formatShortDate } from '../components/format';
 
 export default function Pnl(): ReactElement {
@@ -87,24 +88,22 @@ export default function Pnl(): ReactElement {
 
   return (
     <section className="space-y-6">
-      <header className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold text-foreground">Profit &amp; loss</h1>
-          <p className="text-muted-foreground">
-            Costs vs. outputs across your homestead, with a running net.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => {
-            setCreateError(null);
-            setCreateOpen(true);
-          }}
-        >
-          Add sale
-        </button>
-      </header>
+      <PageHeader
+        title="Profit & loss"
+        subtitle="Costs vs. outputs across your homestead, with a running net."
+        actions={
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => {
+              setCreateError(null);
+              setCreateOpen(true);
+            }}
+          >
+            Add sale
+          </button>
+        }
+      />
 
       {pnlError && <p className="form-error">Could not load P&amp;L: {pnlError}</p>}
       {pnl === null && !pnlError && <p className="text-muted-foreground">Loading...</p>}

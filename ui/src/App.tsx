@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
-import { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from './auth/useAuth';
 import Logo from './components/Logo';
 import UserMenu from './components/UserMenu';
@@ -18,55 +18,138 @@ const linkClass =
       ? `${baseLink} ${extra} bg-primary-100 text-primary-700`
       : `${baseLink} ${extra} text-muted-foreground hover:bg-muted hover:text-foreground`;
 
-const desktopLink = linkClass('px-3 py-1.5');
+const desktopBarLink = linkClass('px-3 py-1.5');
+const desktopMenuLink = linkClass('block px-3 py-2');
 const mobileLink = linkClass('block px-3 py-2.5');
 
-function NavItems({
-  className,
-  onNavigate,
-}: {
-  className: ReturnType<typeof linkClass>;
-  onNavigate?: () => void;
-}): ReactElement {
+interface NavLeaf {
+  to: string;
+  label: string;
+}
+
+interface NavGroup {
+  label: string;
+  items: NavLeaf[];
+}
+
+// The 13 routes are grouped into a handful of sections so the bar stays
+// scannable. Every route remains reachable — desktop renders each group as a
+// dropdown menu, mobile renders them as labelled sections in the sheet.
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'Animals',
+    items: [
+      { to: '/animals', label: 'Animals' },
+      { to: '/pastures', label: 'Pastures' },
+      { to: '/hatchery', label: 'Hatchery' },
+      { to: '/health', label: 'Health' },
+    ],
+  },
+  {
+    label: 'Production',
+    items: [
+      { to: '/eggs', label: 'Eggs' },
+      { to: '/milk', label: 'Milk' },
+      { to: '/feed', label: 'Feed' },
+      { to: '/care', label: 'Care' },
+    ],
+  },
+  {
+    label: 'Garden',
+    items: [
+      { to: '/garden', label: 'Garden' },
+      { to: '/beds', label: 'Beds & crops' },
+      { to: '/good-roots', label: 'Good Roots' },
+    ],
+  },
+  {
+    label: 'Insights',
+    items: [
+      { to: '/', label: 'Dashboard' },
+      { to: '/pnl', label: 'P&L' },
+    ],
+  },
+  {
+    label: 'Ask',
+    items: [{ to: '/copilot', label: 'Copilot' }],
+  },
+];
+
+// A single desktop group: a trigger button that opens a dropdown of its
+// routes. Mirrors the UserMenu dropdown — click-outside + Escape close it, and
+// the trigger reflects the open state and whether the active route lives
+// inside the group.
+function DesktopNavGroup({ group }: { group: NavGroup }): ReactElement {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const location = useLocation();
+
+  const groupActive = group.items.some((item) =>
+    item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to),
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e: MouseEvent): void => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [open]);
+
+  // A single-route group needs no dropdown — render it as a plain link.
+  if (group.items.length === 1) {
+    return (
+      <NavLink to={group.items[0].to} end={group.items[0].to === '/'} className={desktopBarLink}>
+        {group.label}
+      </NavLink>
+    );
+  }
+
   return (
-    <>
-      <NavLink to="/animals" className={className} onClick={onNavigate}>
-        Animals
-      </NavLink>
-      <NavLink to="/pastures" className={className} onClick={onNavigate}>
-        Pastures
-      </NavLink>
-      <NavLink to="/feed" className={className} onClick={onNavigate}>
-        Feed
-      </NavLink>
-      <NavLink to="/eggs" className={className} onClick={onNavigate}>
-        Eggs
-      </NavLink>
-      <NavLink to="/milk" className={className} onClick={onNavigate}>
-        Milk
-      </NavLink>
-      <NavLink to="/hatchery" className={className} onClick={onNavigate}>
-        Hatchery
-      </NavLink>
-      <NavLink to="/care" className={className} onClick={onNavigate}>
-        Care
-      </NavLink>
-      <NavLink to="/health" className={className} onClick={onNavigate}>
-        Health
-      </NavLink>
-      <NavLink to="/garden" className={className} onClick={onNavigate}>
-        Garden
-      </NavLink>
-      <NavLink to="/good-roots" className={className} onClick={onNavigate}>
-        Good Roots
-      </NavLink>
-      <NavLink to="/pnl" className={className} onClick={onNavigate}>
-        P&amp;L
-      </NavLink>
-      <NavLink to="/copilot" className={className} onClick={onNavigate}>
-        Copilot
-      </NavLink>
-    </>
+    <div ref={wrapperRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={`${baseLink} px-3 py-1.5 inline-flex items-center gap-1 ${
+          groupActive
+            ? 'bg-primary-100 text-primary-700'
+            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+        }`}
+      >
+        {group.label}
+        <span aria-hidden className="text-[0.6rem] leading-none">
+          ▾
+        </span>
+      </button>
+      {open && (
+        <div role="menu" className="absolute left-0 mt-2 w-48 card overflow-hidden z-50 p-1">
+          {group.items.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              role="menuitem"
+              end={item.to === '/'}
+              className={desktopMenuLink}
+              onClick={() => setOpen(false)}
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -86,6 +169,7 @@ export default function App(): ReactElement {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center gap-4 sm:gap-6">
           <NavLink
             to="/"
+            end
             className="flex items-center gap-2 text-base font-semibold text-foreground shrink-0"
             onClick={() => setMenuOpen(false)}
           >
@@ -93,9 +177,12 @@ export default function App(): ReactElement {
             Homestead
           </NavLink>
 
-          {/* Desktop nav — hidden on small screens in favour of the sheet. */}
+          {/* Desktop nav — grouped dropdowns, hidden on small screens in
+              favour of the sheet. */}
           <nav className="hidden md:flex items-center gap-1 flex-1" aria-label="Primary">
-            <NavItems className={desktopLink} />
+            {NAV_GROUPS.map((group) => (
+              <DesktopNavGroup key={group.label} group={group} />
+            ))}
           </nav>
 
           {/* Pushes the controls to the right on mobile, where the nav is hidden. */}
@@ -148,14 +235,32 @@ export default function App(): ReactElement {
           </button>
         </div>
 
-        {/* Mobile nav sheet — collapses the primary links behind the hamburger. */}
+        {/* Mobile nav sheet — collapses the primary links behind the hamburger,
+            grouped into the same labelled sections as the desktop dropdowns. */}
         {menuOpen && (
           <nav
             id="mobile-nav"
-            className="md:hidden border-t border-border px-2 py-2 flex flex-col gap-1"
+            className="md:hidden border-t border-border px-2 py-2 flex flex-col gap-3"
             aria-label="Primary"
           >
-            <NavItems className={mobileLink} onNavigate={() => setMenuOpen(false)} />
+            {NAV_GROUPS.map((group) => (
+              <div key={group.label} className="flex flex-col gap-1">
+                <span className="px-3 pt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {group.label}
+                </span>
+                {group.items.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.to === '/'}
+                    className={mobileLink}
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    {item.label}
+                  </NavLink>
+                ))}
+              </div>
+            ))}
           </nav>
         )}
       </header>

@@ -5,6 +5,7 @@ import { useApiFetch, ApiError } from '../auth/useApiFetch';
 import { createAnimal } from '../api/animals';
 import type { CreateAnimalRequest } from '../api/types';
 import RegisterAnimalForm from '../components/RegisterAnimalForm';
+import PageHeader from '../components/PageHeader';
 
 export default function AnimalNew(): ReactElement {
   const apiFetch = useApiFetch();
@@ -27,9 +28,7 @@ export default function AnimalNew(): ReactElement {
 
   return (
     <section className="space-y-4">
-      <header>
-        <h1 className="text-2xl font-semibold text-foreground">Register animal</h1>
-      </header>
+      <PageHeader title="Register animal" />
       <RegisterAnimalForm
         busy={busy}
         serverError={serverError}

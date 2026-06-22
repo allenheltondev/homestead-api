@@ -14,6 +14,7 @@ import { createMilkLog, deleteMilkLog, listMilkLogs } from '../api/milk';
 import { getMilkCost } from '../api/stats';
 import type { CreateMilkLogRequest, MilkCostStats, MilkLog } from '../api/types';
 import Modal from '../components/Modal';
+import PageHeader from '../components/PageHeader';
 import { formatShortDate } from '../components/format';
 
 function gallons(n: number): string {
@@ -119,24 +120,22 @@ export default function Milk(): ReactElement {
 
   return (
     <section className="space-y-6">
-      <header className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold text-foreground">Milk</h1>
-          <p className="text-muted-foreground">
-            Log milkings and track your cost per gallon.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => {
-            setCreateError(null);
-            setCreateOpen(true);
-          }}
-        >
-          Log milking
-        </button>
-      </header>
+      <PageHeader
+        title="Milk"
+        subtitle="Log milkings and track your cost per gallon."
+        actions={
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => {
+              setCreateError(null);
+              setCreateOpen(true);
+            }}
+          >
+            Log milking
+          </button>
+        }
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <section className="space-y-3">

@@ -23,6 +23,7 @@ import type {
   GrowerCrop,
 } from '../api/types';
 import Modal from '../components/Modal';
+import PageHeader from '../components/PageHeader';
 
 export default function Beds(): ReactElement {
   const apiFetch = useApiFetch();
@@ -155,17 +156,15 @@ export default function Beds(): ReactElement {
 
   return (
     <section className="space-y-8">
-      <header className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold text-foreground">Garden beds &amp; crops</h1>
-          <p className="text-muted-foreground">
-            Manage your Good Roots crop library and garden beds.
-          </p>
-        </div>
-        <Link to="/garden" className="btn-secondary w-auto">
-          Back to garden
-        </Link>
-      </header>
+      <PageHeader
+        title="Garden beds & crops"
+        subtitle="Manage your Good Roots crop library and garden beds."
+        actions={
+          <Link to="/garden" className="btn-secondary w-auto">
+            Back to garden
+          </Link>
+        }
+      />
 
       {error && <p className="form-error">{error}</p>}
 
@@ -335,12 +334,10 @@ export default function Beds(): ReactElement {
 function ConnectGoodRoots(): ReactElement {
   return (
     <section className="space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold text-foreground">Garden beds &amp; crops</h1>
-        <p className="text-muted-foreground">
-          Manage your Good Roots crop library and garden beds.
-        </p>
-      </header>
+      <PageHeader
+        title="Garden beds & crops"
+        subtitle="Manage your Good Roots crop library and garden beds."
+      />
       <div className="card card-body text-center py-16 space-y-4">
         <div className="text-4xl" aria-hidden>
           🌱

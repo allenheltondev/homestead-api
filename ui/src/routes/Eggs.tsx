@@ -18,6 +18,7 @@ import RegisterEggCollectionForm from '../components/RegisterEggCollectionForm';
 import EggsChart from '../components/EggsChart';
 import EggCostCard from '../components/EggCostCard';
 import EggCostByFlockTable from '../components/EggCostByFlockTable';
+import PageHeader from '../components/PageHeader';
 import { formatShortDate } from '../components/format';
 
 const DEFAULT_STORE_PRICE = 4;
@@ -131,24 +132,22 @@ export default function Eggs(): ReactElement {
 
   return (
     <section className="space-y-6">
-      <header className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold text-foreground">Eggs</h1>
-          <p className="text-muted-foreground">
-            Log collections and track your cost per dozen.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => {
-            setCreateError(null);
-            setCreateOpen(true);
-          }}
-        >
-          Log eggs
-        </button>
-      </header>
+      <PageHeader
+        title="Eggs"
+        subtitle="Log collections and track your cost per dozen."
+        actions={
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => {
+              setCreateError(null);
+              setCreateOpen(true);
+            }}
+          >
+            Log eggs
+          </button>
+        }
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <section className="space-y-3">
