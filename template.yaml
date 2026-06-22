@@ -305,10 +305,14 @@ Resources:
             FunctionArn: !GetAtt ApiAuthorizerFunction.Arn
             Identity:
               Header: Authorization
-              # No caching while the design settles -- revocation takes
-              # effect on the next request. Revisit once call volume
-              # justifies trading cache TTL for revocation latency.
-              ReauthorizeEvery: 0
+              # Cache the authorizer's IAM policy for 5 minutes. The authorizer
+              # returns a wildcard (/*/*/*) resource policy, so one cache entry
+              # per token covers every method/path the caller hits within the
+              # TTL -- skipping the authorizer Lambda (and a cold-start + JWKS
+              # fetch) on repeat requests. This is the main latency win for a
+              # low-traffic personal API. Trade-off: a revoked/expired token is
+              # still accepted until its cache entry ages out (<= 5 min).
+              ReauthorizeEvery: 300
       Cors:
         AllowOrigin: !If
           - DeployCustomDomain
