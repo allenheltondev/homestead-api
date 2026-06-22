@@ -571,14 +571,16 @@ function speakHarvestQuantity(quantity, unit) {
   return pluralize(Number(quantity) || 0, noun);
 }
 
-// Confirmation line after POST /harvest-logs ("Got it. I logged 5 pounds of
-// tomatoes.").
+// Confirmation line after recording a harvest to the Good Roots Network
+// (POST /grn/crops/{cropLibraryId}/harvests). Accepts either the GRN response
+// or the fields we sent; the amount may arrive as `amount` (GRN) or `quantity`
+// ("Got it. I logged 5 pounds of tomatoes.").
 export function renderHarvestLogged(result) {
   if (!result || typeof result !== "object") {
     return "Got it. I logged that harvest.";
   }
-  const crop = result.crop ?? "produce";
-  const quantity = result.quantity;
+  const crop = result.crop ?? result.cropName ?? "produce";
+  const quantity = result.amount ?? result.quantity;
   const unit = result.unit ?? "lb";
   if (quantity == null || !Number.isFinite(Number(quantity))) {
     return `Got it. I logged a ${crop} harvest.`;
@@ -613,15 +615,15 @@ export function renderGardenStats(stats) {
   return `${line}.`;
 }
 
-// Confirmation line after POST /harvest-logs/{id}/publish: the surplus is now
-// listed on the Good Roots Network ("Done. I shared 5 pounds of tomatoes with
-// the Good Roots Network.").
+// Confirmation line after POST /grn/crops/{cropLibraryId}/publish-surplus: the
+// surplus is now listed on the Good Roots Network ("Done. I shared 5 pounds of
+// tomatoes with the Good Roots Network.").
 export function renderSurplusPublished(result) {
   if (!result || typeof result !== "object") {
     return "Done. I shared your surplus with the Good Roots Network.";
   }
-  const crop = result.crop ?? "produce";
-  const quantity = result.quantity;
+  const crop = result.crop ?? result.cropName ?? "produce";
+  const quantity = result.amount ?? result.quantity;
   const unit = result.unit ?? "lb";
   if (quantity == null || !Number.isFinite(Number(quantity))) {
     return `Done. I shared your ${crop} with the Good Roots Network.`;

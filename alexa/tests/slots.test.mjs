@@ -410,6 +410,8 @@ describe("normalizeHarvestUnit", () => {
 });
 
 describe("buildHarvestFields", () => {
+  // Harvests record to the GRN per-crop now: crop is the spoken NAME (resolved
+  // to a cropLibraryId by the handler) and the body uses amount/harvestedOn.
   test("defaults to pounds when no unit is given", () => {
     const fields = buildHarvestFields(
       intentWith({
@@ -427,9 +429,9 @@ describe("buildHarvestFields", () => {
     );
     expect(fields).toEqual({
       crop: "tomatoes",
-      quantity: 5,
+      amount: 5,
       unit: "lb",
-      date: "2026-06-21",
+      harvestedOn: "2026-06-21",
     });
   });
 
@@ -441,10 +443,10 @@ describe("buildHarvestFields", () => {
         unit: { value: "bunches" },
       }),
     );
-    expect(fields).toEqual({ crop: "kale", quantity: 3, unit: "bunch" });
+    expect(fields).toEqual({ crop: "kale", amount: 3, unit: "bunch" });
   });
 
-  test("omits quantity + unit when no quantity is given", () => {
+  test("omits amount + unit when no quantity is given", () => {
     expect(
       buildHarvestFields(intentWith({ crop: { value: "squash" } })),
     ).toEqual({ crop: "squash" });
@@ -458,6 +460,6 @@ describe("buildHarvestFields", () => {
         date: { value: "tomorrow" },
       }),
     );
-    expect(fields).toEqual({ crop: "beans", quantity: 2, unit: "lb" });
+    expect(fields).toEqual({ crop: "beans", amount: 2, unit: "lb" });
   });
 });

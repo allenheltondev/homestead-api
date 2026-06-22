@@ -7,6 +7,8 @@ const {
   tokenFromRequest,
   ApiError,
   MissingTokenError,
+  grnCropList,
+  resolveCropLibraryId,
 } = await import("../lib/api.mjs");
 
 function handlerInputWithToken(token) {
@@ -399,21 +401,72 @@ describe("createApiClient", () => {
 
   // --- Garden pillar + Good Roots Network (GRN) ---------------------------
 
-  test("recordHarvest POSTs crop + quantity to /harvest-logs", async () => {
-    const fetchMock = mockFetch(201, { id: "hv1", crop: "tomatoes", quantity: 5 });
+  test("listGrnCrops GETs /grn/crops", async () => {
+    const fetchMock = mockFetch(200, { crops: [{ id: "c1", name: "Tomatoes" }] });
     global.fetch = fetchMock;
 
     const api = createApiClient(handlerInputWithToken("tok-abc"));
-    await api.recordHarvest({ crop: "tomatoes", quantity: 5, unit: "lb" });
+    await api.listGrnCrops();
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://api.example.test/v1/harvest-logs");
+    expect(url).toBe("https://api.example.test/v1/grn/crops");
+    expect(init.method).toBe("GET");
+  });
+
+  test("recordHarvest POSTs the harvest body to /grn/crops/{id}/harvests", async () => {
+    const fetchMock = mockFetch(201, { id: "h1", amount: 5 });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.recordHarvest({
+      cropLibraryId: "c1",
+      amount: 5,
+      unit: "lb",
+      harvestedOn: "2026-06-22",
+      notes: "ripe",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.example.test/v1/grn/crops/c1/harvests");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body)).toEqual({
-      crop: "tomatoes",
-      quantity: 5,
+      amount: 5,
       unit: "lb",
+      harvestedOn: "2026-06-22",
+      notes: "ripe",
     });
+  });
+
+  test("recordHarvest omits unset optional fields from the body", async () => {
+    const fetchMock = mockFetch(201, { id: "h2" });
+    global.fetch = fetchMock;
+
+    const api = createApiClient(handlerInputWithToken("tok-abc"));
+    await api.recordHarvest({ cropLibraryId: "c2", amount: 3, unit: "lb" });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({ amount: 3, unit: "lb" });
+  });
+
+  test("grnCropList normalizes array and wrapped payloads", () => {
+    expect(grnCropList([{ id: "c1" }])).toEqual([{ id: "c1" }]);
+    expect(grnCropList({ crops: [{ id: "c2" }] })).toEqual([{ id: "c2" }]);
+    expect(grnCropList(null)).toEqual([]);
+  });
+
+  test("resolveCropLibraryId matches the crop name case-insensitively", async () => {
+    const api = {
+      listGrnCrops: jest.fn().mockResolvedValue({
+        crops: [
+          { id: "c1", name: "Tomatoes" },
+          { id: "c2", name: "Kale" },
+        ],
+      }),
+    };
+    expect(await resolveCropLibraryId(api, "tomatoes")).toBe("c1");
+    expect(await resolveCropLibraryId(api, "  KALE ")).toBe("c2");
+    expect(await resolveCropLibraryId(api, "okra")).toBeUndefined();
+    expect(await resolveCropLibraryId(api, "")).toBeUndefined();
   });
 
   test("getGardenStats GETs /stats/garden with the period query", async () => {
@@ -440,16 +493,16 @@ describe("createApiClient", () => {
     );
   });
 
-  test("publishSurplus POSTs to /harvest-logs/{id}/publish", async () => {
+  test("publishSurplus POSTs to /grn/crops/{id}/publish-surplus", async () => {
     const fetchMock = mockFetch(200, { crop: "tomatoes", quantity: 3 });
     global.fetch = fetchMock;
 
     const api = createApiClient(handlerInputWithToken("tok-abc"));
-    await api.publishSurplus("hv1", { quantity: 3 });
+    await api.publishSurplus("c1", { quantity: 3 });
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(
-      "https://api.example.test/v1/harvest-logs/hv1/publish",
+      "https://api.example.test/v1/grn/crops/c1/publish-surplus",
     );
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body)).toEqual({ quantity: 3 });
