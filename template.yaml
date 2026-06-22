@@ -59,13 +59,6 @@ Parameters:
       invocation to this skill via SkillId. Leave empty during the first
       deploy (before the skill exists in the Alexa console), then set it
       and redeploy to lock the trigger down.
-  ApiAlarmEmail:
-    Type: String
-    Default: ""
-    Description: |
-      Optional email subscribed to the CloudWatch alarm SNS topic (API 5xx
-      rate, authorizer failures, throttling). Leave empty to create the
-      alarms and topic without a notification subscription.
   BedrockModelId:
     Type: String
     Default: "us.amazon.nova-pro-v1:0"
@@ -191,8 +184,6 @@ Conditions:
     - !Condition HasHostedZoneId
   # Skill-restrict the Alexa trigger only once an AlexaSkillId is supplied.
   HasAlexaSkillId: !Not [!Equals [!Ref AlexaSkillId, ""]]
-  # Subscribe an email to the alarm topic only when one is provided.
-  HasApiAlarmEmail: !Not [!Equals [!Ref ApiAlarmEmail, ""]]
 
 Metadata:
   esbuild-properties: &esbuild-properties
@@ -618,98 +609,10 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/amazon.nova-pro-v1:0"
                 - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*amazon.nova-pro-v1:0"
 
-  # --- Observability / hardening ----------------------------------------
-  # SNS topic alarms publish to. An email subscription is added only when
-  # ApiAlarmEmail is supplied.
-  ApiAlarmTopic:
-    Type: AWS::SNS::Topic
-    Properties:
-      TopicName: !Sub "homestead-api-alarms-${Environment}"
-
-  ApiAlarmEmailSubscription:
-    Type: AWS::SNS::Subscription
-    Condition: HasApiAlarmEmail
-    Properties:
-      TopicArn: !Ref ApiAlarmTopic
-      Protocol: email
-      Endpoint: !Ref ApiAlarmEmail
-
-  # API Gateway 5xx rate: fires when the API returns server errors. Uses the
-  # AWS/ApiGateway 5XXError metric scoped to this REST API + stage.
-  Api5xxAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub "homestead-api-5xx-${Environment}"
-      AlarmDescription: API Gateway is returning 5xx server errors.
-      Namespace: AWS/ApiGateway
-      MetricName: 5XXError
-      Dimensions:
-        - Name: ApiName
-          Value: !Ref HomesteadApi
-        - Name: Stage
-          Value: v1
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 5
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Ref ApiAlarmTopic
-      OKActions:
-        - !Ref ApiAlarmTopic
-
-  # Authorizer failures: a sustained spike of 401s from API Gateway usually
-  # means the Cognito authorizer is rejecting tokens (misconfig or outage)
-  # rather than ordinary unauthenticated callers.
-  ApiAuthFailureAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub "homestead-api-authorizer-failures-${Environment}"
-      AlarmDescription: Elevated 401 Unauthorized responses from the API authorizer.
-      Namespace: AWS/ApiGateway
-      MetricName: 4XXError
-      Dimensions:
-        - Name: ApiName
-          Value: !Ref HomesteadApi
-        - Name: Stage
-          Value: v1
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 25
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Ref ApiAlarmTopic
-      OKActions:
-        - !Ref ApiAlarmTopic
-
-  # Alexa skill Lambda errors: surfaces failures in the voice path
-  # (unhandled exceptions, API client errors that escape the handlers).
-  AlexaSkillErrorAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub "homestead-alexa-errors-${Environment}"
-      AlarmDescription: The Alexa skill Lambda is erroring.
-      Namespace: AWS/Lambda
-      MetricName: Errors
-      Dimensions:
-        - Name: FunctionName
-          Value: !Ref AlexaSkillFunction
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 1
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Ref ApiAlarmTopic
-
   # Static hosting for the dashboard UI. Bucket is private; only the
-  # CloudFront distribution (via OAC) can read it. SPA routing rewrites
-  # 403/404 to /index.html so deep links survive a refresh. CI builds
-  # ui/, syncs the output here, and invalidates the distribution.
+  # CloudFront distribution (via OAC) can read it. The SpaRewriteFunction
+  # maps extensionless deep links to /index.html so they survive a refresh.
+  # CI builds ui/, syncs the output here, and invalidates the distribution.
   DashboardBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -948,10 +851,6 @@ Outputs:
       ARN of the Alexa skill Lambda. Use this as the skill's default
       endpoint in the Alexa developer console.
     Value: !GetAtt AlexaSkillFunction.Arn
-
-  ApiAlarmTopicArn:
-    Description: SNS topic CloudWatch API/Alexa alarms publish to.
-    Value: !Ref ApiAlarmTopic
 
   DashboardBucketName:
     Description: S3 bucket holding the dashboard static bundle
