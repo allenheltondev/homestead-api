@@ -1,17 +1,20 @@
 import type { ReactElement } from 'react';
 import { useState } from 'react';
-import type { Bed, CreateHarvestLogRequest } from '../api/types';
+import type { Bed, CreateHarvestLogRequest, GrowerCrop } from '../api/types';
 
 interface Props {
   busy: boolean;
   serverError: string | null;
   beds?: Bed[];
+  crops?: GrowerCrop[];
   submitLabel?: string;
   onSubmit: (payload: CreateHarvestLogRequest) => void;
   onCancel: () => void;
 }
 
 interface FormState {
+  // Selected Good Roots crop-library id, '' when entering a custom crop.
+  cropLibraryId: string;
   crop: string;
   quantity: string;
   unit: string;
@@ -22,6 +25,7 @@ interface FormState {
 }
 
 const EMPTY: FormState = {
+  cropLibraryId: '',
   crop: '',
   quantity: '',
   unit: 'lb',
@@ -31,12 +35,20 @@ const EMPTY: FormState = {
   note: '',
 };
 
-// Logs a garden harvest. crop and quantity are required; unit defaults to lb;
-// date defaults server-side to today; bed, cost, and note are optional.
+// Builds the display name for a crop-library entry (crop · variety).
+function cropLabel(c: GrowerCrop): string {
+  return c.variety ? `${c.name} · ${c.variety}` : c.name;
+}
+
+// Logs a garden harvest. Crop is chosen from the Good Roots crop library (which
+// stores cropLibraryId + cropName) with a free-text fallback when GRN is
+// unconfigured. quantity is required; unit defaults to lb; date defaults
+// server-side to today; bed, cost, and note are optional.
 export default function RegisterHarvestForm({
   busy,
   serverError,
   beds,
+  crops,
   submitLabel = 'Log harvest',
   onSubmit,
   onCancel,
@@ -44,8 +56,21 @@ export default function RegisterHarvestForm({
   const [form, setForm] = useState<FormState>(EMPTY);
   const [validationError, setValidationError] = useState<string | null>(null);
 
+  const hasLibrary = !!crops && crops.length > 0;
+
   const update = <K extends keyof FormState>(key: K, value: FormState[K]): void => {
     setForm((f) => ({ ...f, [key]: value }));
+  };
+
+  // Selecting a library crop fixes the display crop name; '' returns to custom
+  // free-text entry.
+  const onSelectCrop = (id: string): void => {
+    const picked = crops?.find((c) => c.id === id) ?? null;
+    setForm((f) => ({
+      ...f,
+      cropLibraryId: id,
+      crop: picked ? cropLabel(picked) : '',
+    }));
   };
 
   const submit = (): void => {
@@ -62,6 +87,7 @@ export default function RegisterHarvestForm({
     }
 
     const payload: CreateHarvestLogRequest = { crop, quantity };
+    if (form.cropLibraryId) payload.cropLibraryId = form.cropLibraryId;
     const unit = form.unit.trim();
     if (unit.length > 0) payload.unit = unit;
     if (form.date) payload.date = form.date;
@@ -80,21 +106,54 @@ export default function RegisterHarvestForm({
     onSubmit(payload);
   };
 
+  // When a library crop is selected, the name is locked to that entry; the
+  // "Custom" option re-enables free-text editing.
+  const customCrop = form.cropLibraryId === '';
+
   return (
     <div className="card card-body space-y-3 max-w-2xl">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <label className="block sm:col-span-1">
-          <span className="field-label">Crop</span>
-          <input
-            type="text"
-            className="input"
-            value={form.crop}
-            onChange={(e) => update('crop', e.target.value)}
-            placeholder="e.g. tomatoes"
-            disabled={busy}
-            autoFocus
-          />
-        </label>
+        {hasLibrary ? (
+          <label className="block sm:col-span-1">
+            <span className="field-label">Crop</span>
+            <select
+              className="input"
+              value={form.cropLibraryId}
+              onChange={(e) => onSelectCrop(e.target.value)}
+              disabled={busy}
+            >
+              <option value="">Custom (free text)</option>
+              {crops?.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {cropLabel(c)}
+                </option>
+              ))}
+            </select>
+            {customCrop && (
+              <input
+                type="text"
+                className="input mt-2"
+                value={form.crop}
+                onChange={(e) => update('crop', e.target.value)}
+                placeholder="e.g. tomatoes"
+                disabled={busy}
+              />
+            )}
+          </label>
+        ) : (
+          <label className="block sm:col-span-1">
+            <span className="field-label">Crop</span>
+            <input
+              type="text"
+              className="input"
+              value={form.crop}
+              onChange={(e) => update('crop', e.target.value)}
+              placeholder="e.g. tomatoes"
+              disabled={busy}
+              autoFocus
+            />
+          </label>
+        )}
         <label className="block">
           <span className="field-label">Quantity</span>
           <input

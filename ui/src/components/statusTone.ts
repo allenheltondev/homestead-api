@@ -29,18 +29,3 @@ export function claimTone(status: string): StatusTone {
       return 'muted';
   }
 }
-
-export function plantingTone(status: string): StatusTone {
-  switch (status) {
-    case 'growing':
-      return 'success';
-    case 'planned':
-      return 'primary';
-    case 'harvested':
-      return 'muted';
-    case 'failed':
-      return 'error';
-    default:
-      return 'muted';
-  }
-}

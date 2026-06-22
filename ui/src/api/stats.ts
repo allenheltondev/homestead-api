@@ -161,4 +161,4 @@ export async function getPnl(apiFetch: ApiFetch, period?: string): Promise<PnlSt
 
 // Garden stats live in api/garden.ts; re-exported here so callers can keep
 // importing analytics from a single `api/stats` module.
-export { getGardenStats, getPlantingCalendar } from './garden';
+export { getGardenStats } from './garden';
