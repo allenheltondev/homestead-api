@@ -66,8 +66,8 @@ describe("validateClaimCreate", () => {
 
 describe("buildListingPayload", () => {
   const harvest = { cropName: "Tomato", variety: "Roma", quantity: 5, unit: "lb", harvestedAt: "2026-06-15T00:00:00.000Z" };
-  test("maps harvest + body to the GRN UpsertListingRequest fields", () => {
-    const payload = buildListingPayload(harvest, { cropId: UUID, availableEnd: "2026-06-30" });
+  test("maps harvest + body + resolved crop to the GRN UpsertListingRequest fields", () => {
+    const payload = buildListingPayload(harvest, { availableEnd: "2026-06-30" }, { cropId: UUID });
     expect(payload.cropId).toBe(UUID);
     expect(payload.quantityTotal).toBe(5);
     expect(payload.unit).toBe("lb");
@@ -76,9 +76,14 @@ describe("buildListingPayload", () => {
     expect(payload.status).toBe("active");
     expect(payload.title).toBe("Tomato (Roma)");
   });
-  test("requires cropId + availableEnd", () => {
-    expect(() => buildListingPayload(harvest, { availableEnd: "2026-06-30" })).toThrow(/cropId/);
-    expect(() => buildListingPayload(harvest, { cropId: UUID })).toThrow(/availableEnd/);
+  test("resolved varietyId flows through; body override wins", () => {
+    const variety = "99999999-8888-7777-6666-555555555555";
+    const p1 = buildListingPayload(harvest, { availableEnd: "2026-06-30" }, { cropId: UUID, varietyId: variety });
+    expect(p1.varietyId).toBe(variety);
+  });
+  test("requires a resolved cropId + body availableEnd", () => {
+    expect(() => buildListingPayload(harvest, { availableEnd: "2026-06-30" }, {})).toThrow(/cropId/);
+    expect(() => buildListingPayload(harvest, {}, { cropId: UUID })).toThrow(/availableEnd/);
   });
 });
 

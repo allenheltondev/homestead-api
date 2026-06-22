@@ -225,3 +225,80 @@ export async function getClaim(claimId, { correlationId } = {}) {
 export async function listCatalogCrops({ correlationId } = {}) {
   return grnRequest("GET", "/catalog/crops", { correlationId });
 }
+
+// --- Crop library pass-through (GRN /crops) -----------------------------
+// GRN's crop library is the single source of truth for a grower's crops. Each
+// row (GrowerCropItem) links to the public catalog via `canonical_id` (a
+// catalog cropId; the legacy `crop_id` field is deprecated) and to a variety
+// via `variety_id`. The harvest publish path reads these to populate a GRN
+// listing's cropId/varietyId.
+
+// GET /crops — list the caller's crop library entries (query passed through).
+export async function listGrowerCrops({ query, correlationId } = {}) {
+  return grnRequest("GET", "/crops", { query, correlationId });
+}
+
+// POST /crops — create a crop library entry (UpsertGrowerCropRequest body).
+export async function createGrowerCrop(payload, { idempotencyKey, correlationId } = {}) {
+  return grnRequest("POST", "/crops", { body: payload, idempotencyKey, correlationId });
+}
+
+// GET /crops/{cropLibraryId} — fetch one crop library entry. Used by the
+// harvest publish path to resolve the catalog cropId/varietyId.
+export async function getGrowerCrop(cropLibraryId, { correlationId } = {}) {
+  return grnRequest("GET", `/crops/${encodeURIComponent(cropLibraryId)}`, { correlationId });
+}
+
+// PUT /crops/{cropLibraryId} — update one crop library entry.
+export async function updateGrowerCrop(cropLibraryId, payload, { idempotencyKey, correlationId } = {}) {
+  return grnRequest("PUT", `/crops/${encodeURIComponent(cropLibraryId)}`, {
+    body: payload,
+    idempotencyKey,
+    correlationId,
+  });
+}
+
+// DELETE /crops/{cropLibraryId} — delete one crop library entry.
+export async function deleteGrowerCrop(cropLibraryId, { correlationId } = {}) {
+  return grnRequest("DELETE", `/crops/${encodeURIComponent(cropLibraryId)}`, { correlationId });
+}
+
+// GET /catalog/crops/{cropId}/varieties — catalog varieties for a crop.
+export async function listCatalogVarieties(cropId, { correlationId } = {}) {
+  return grnRequest("GET", `/catalog/crops/${encodeURIComponent(cropId)}/varieties`, { correlationId });
+}
+
+// --- Garden bed pass-through (GRN /beds) ---------------------------------
+// GRN owns garden bed structure (geometry + crop-library metadata). These are
+// thin pass-throughs over UpsertGardenBedRequest / GardenBed.
+
+// GET /beds — list the caller's garden beds.
+export async function listGrowerBeds({ query, correlationId } = {}) {
+  return grnRequest("GET", "/beds", { query, correlationId });
+}
+
+// POST /beds — create a garden bed.
+export async function createGrowerBed(payload, { idempotencyKey, correlationId } = {}) {
+  return grnRequest("POST", "/beds", { body: payload, idempotencyKey, correlationId });
+}
+
+// GET /beds/{bedId} — fetch one garden bed. NOTE: the published GRN contract
+// documents PUT/DELETE on this path (and GET on the collection); a GET here is
+// passed through and any upstream rejection surfaces as an upstream error.
+export async function getGrowerBed(bedId, { correlationId } = {}) {
+  return grnRequest("GET", `/beds/${encodeURIComponent(bedId)}`, { correlationId });
+}
+
+// PUT /beds/{bedId} — update a garden bed.
+export async function updateGrowerBed(bedId, payload, { idempotencyKey, correlationId } = {}) {
+  return grnRequest("PUT", `/beds/${encodeURIComponent(bedId)}`, {
+    body: payload,
+    idempotencyKey,
+    correlationId,
+  });
+}
+
+// DELETE /beds/{bedId} — archive (soft-delete) a garden bed.
+export async function deleteGrowerBed(bedId, { correlationId } = {}) {
+  return grnRequest("DELETE", `/beds/${encodeURIComponent(bedId)}`, { correlationId });
+}

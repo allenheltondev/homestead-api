@@ -45,7 +45,10 @@ export function validateHarvestLogCreate(body) {
     throw new BadRequestError("request body must be a JSON object");
   }
 
-  const { cropName, variety, quantity, unit, harvestedAt, date, plantingId, surplus } = body;
+  const {
+    cropName, variety, quantity, unit, harvestedAt, date,
+    cropLibraryId, grnBedId, surplus,
+  } = body;
 
   if (typeof quantity !== "number" || !Number.isFinite(quantity) || quantity <= 0) {
     throw new BadRequestError("quantity must be a positive number");
@@ -73,7 +76,10 @@ export function validateHarvestLogCreate(body) {
     quantity,
     unit: normalizedUnit,
     harvestedAt: normalizeHarvestedAt(harvestedAt ?? date),
-    plantingId: normalizeText(plantingId, "plantingId"),
+    // Optional GRN linkage. cropLibraryId is the GRN grower-crop id (closes the
+    // publish gap — see routes/harvest.mjs); grnBedId is the GRN garden-bed id.
+    cropLibraryId: normalizeText(cropLibraryId, "cropLibraryId"),
+    grnBedId: normalizeText(grnBedId, "grnBedId"),
     surplus: normalizedSurplus,
   };
 }
@@ -140,7 +146,8 @@ export function formatHarvestLog(row) {
     quantity: row.quantity,
     unit: row.unit,
     harvestedAt: row.harvestedAt,
-    plantingId: row.plantingId ?? null,
+    cropLibraryId: row.cropLibraryId ?? null,
+    grnBedId: row.grnBedId ?? null,
     surplus: row.surplus ?? false,
     grnListingId: row.grnListingId ?? null,
     grnStatus: row.grnStatus ?? null,
