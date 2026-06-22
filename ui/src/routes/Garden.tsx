@@ -2,21 +2,22 @@ import type { ReactElement } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApiFetch, ApiError } from '../auth/useApiFetch';
-import {
-  createHarvestLog,
-  deleteHarvestLog,
-  listHarvestLogs,
-  publishHarvestLog,
-  unpublishHarvestLog,
-} from '../api/harvest';
 import { getGardenStats } from '../api/garden';
-import { listBeds, listGrowerCrops } from '../api/grn';
+import {
+  getCropHarvests,
+  isGrnNotConnected,
+  listGrowerCrops,
+  publishCropSurplus,
+  recordCropHarvest,
+} from '../api/grn';
 import type {
-  Bed,
-  CreateHarvestLogRequest,
   GardenStats,
+  GrnListing,
   GrowerCrop,
-  HarvestLog,
+  HarvestItem,
+  HarvestLogResponse,
+  PublishCropSurplusRequest,
+  RecordCropHarvestRequest,
 } from '../api/types';
 import Modal from '../components/Modal';
 import RegisterHarvestForm from '../components/RegisterHarvestForm';
@@ -25,37 +26,60 @@ import StatusBadge from '../components/StatusBadge';
 import { listingTone } from '../components/statusTone';
 import { formatMoney, formatShortDate } from '../components/format';
 
+// Builds the display name for a crop-library entry (crop · variety).
+function cropLabel(c: GrowerCrop): string {
+  return c.variety ? `${c.name} · ${c.variety}` : c.name;
+}
+
 export default function Garden(): ReactElement {
   const apiFetch = useApiFetch();
-  const [logs, setLogs] = useState<HarvestLog[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notConnected, setNotConnected] = useState(false);
   const [stats, setStats] = useState<GardenStats | null>(null);
-  const [beds, setBeds] = useState<Bed[]>([]);
-  const [crops, setCrops] = useState<GrowerCrop[]>([]);
+  const [crops, setCrops] = useState<GrowerCrop[] | null>(null);
 
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  // The crop whose GRN harvest log is shown.
+  const [selectedCropId, setSelectedCropId] = useState('');
+  const [harvests, setHarvests] = useState<HarvestLogResponse | null>(null);
+  const [harvestsError, setHarvestsError] = useState<string | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [sharingId, setSharingId] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareResult, setShareResult] = useState<GrnListing | null>(null);
 
-  const reload = useCallback((): (() => void) => {
+  // GRN crop library powers the crop selector + harvest form. A "not connected"
+  // signal flips the page to the connect prompt.
+  const loadCrops = useCallback((): (() => void) => {
     let cancelled = false;
     setError(null);
-    setLogs(null);
-    listHarvestLogs(apiFetch, { from: from || undefined, to: to || undefined })
+    setCrops(null);
+    listGrowerCrops(apiFetch)
       .then((res) => {
-        if (!cancelled) setLogs(res.harvest_logs);
+        if (cancelled) return;
+        setCrops(res.crops);
+        // Default the selection to the first crop once loaded.
+        setSelectedCropId((prev) =>
+          prev || (res.crops.length > 0 ? res.crops[0].id : ''),
+        );
       })
-      .catch((err: Error) => {
-        if (!cancelled) setError(err.message);
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (isGrnNotConnected(err)) setNotConnected(true);
+        else setError(err instanceof Error ? err.message : 'Failed to load crops.');
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFetch]);
 
-    // Best-effort: garden economics card is independent of the history list.
+  // Garden economics card + yield chart are independent of the GRN crop list.
+  const loadStats = useCallback((): (() => void) => {
+    let cancelled = false;
     getGardenStats(apiFetch)
       .then((res) => {
         if (!cancelled) setStats(res);
@@ -63,78 +87,95 @@ export default function Garden(): ReactElement {
       .catch(() => {
         if (!cancelled) setStats(null);
       });
-
-    // Best-effort: GRN beds power the harvest form's bed picker.
-    listBeds(apiFetch)
-      .then((res) => {
-        if (!cancelled) setBeds(res.beds);
-      })
-      .catch(() => {
-        if (!cancelled) setBeds([]);
-      });
-
-    // Best-effort: GRN crop library powers the harvest form's crop selector.
-    // When unavailable, the form falls back to free-text crop entry.
-    listGrowerCrops(apiFetch)
-      .then((res) => {
-        if (!cancelled) setCrops(res.crops);
-      })
-      .catch(() => {
-        if (!cancelled) setCrops([]);
-      });
-
     return () => {
       cancelled = true;
     };
-  }, [apiFetch, from, to]);
+  }, [apiFetch]);
 
-  useEffect(() => reload(), [reload]);
+  // The selected crop's GRN harvest log + running total.
+  const loadHarvests = useCallback((): (() => void) => {
+    let cancelled = false;
+    if (!selectedCropId) {
+      setHarvests(null);
+      setHarvestsError(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setHarvestsError(null);
+    setHarvests(null);
+    getCropHarvests(apiFetch, selectedCropId)
+      .then((res) => {
+        if (!cancelled) setHarvests(res);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (isGrnNotConnected(err)) setNotConnected(true);
+        else
+          setHarvestsError(
+            err instanceof Error ? err.message : 'Failed to load harvests.',
+          );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFetch, selectedCropId]);
 
-  const handleCreate = async (payload: CreateHarvestLogRequest): Promise<void> => {
+  useEffect(() => loadCrops(), [loadCrops]);
+  useEffect(() => loadStats(), [loadStats]);
+  useEffect(() => loadHarvests(), [loadHarvests]);
+
+  const handleCreate = async (
+    cropLibraryId: string,
+    payload: RecordCropHarvestRequest,
+  ): Promise<void> => {
     setCreateBusy(true);
     setCreateError(null);
     try {
-      await createHarvestLog(apiFetch, payload);
+      await recordCropHarvest(apiFetch, cropLibraryId, payload);
       setCreateOpen(false);
-      reload();
+      // Surface the new harvest immediately under its crop.
+      setSelectedCropId(cropLibraryId);
+      loadHarvests();
+      loadStats();
     } catch (err) {
-      setCreateError(err instanceof ApiError ? err.message : (err as Error).message);
+      if (isGrnNotConnected(err)) {
+        setNotConnected(true);
+        setCreateOpen(false);
+      } else {
+        setCreateError(err instanceof ApiError ? err.message : (err as Error).message);
+      }
     } finally {
       setCreateBusy(false);
     }
   };
 
-  const handleDelete = async (id: string): Promise<void> => {
-    setDeletingId(id);
+  const handleShare = async (
+    cropLibraryId: string,
+    payload: PublishCropSurplusRequest,
+  ): Promise<void> => {
+    setShareBusy(true);
+    setShareError(null);
     try {
-      await deleteHarvestLog(apiFetch, id);
-      reload();
+      const listing = await publishCropSurplus(apiFetch, cropLibraryId, payload);
+      setShareResult(listing);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : (err as Error).message);
+      if (isGrnNotConnected(err)) {
+        setNotConnected(true);
+        setShareOpen(false);
+      } else {
+        setShareError(err instanceof ApiError ? err.message : (err as Error).message);
+      }
     } finally {
-      setDeletingId(null);
+      setShareBusy(false);
     }
   };
 
-  const handleToggleShare = async (log: HarvestLog): Promise<void> => {
-    setSharingId(log.id);
-    setError(null);
-    try {
-      if (log.listing && log.listing.status !== 'expired') {
-        await unpublishHarvestLog(apiFetch, log.id);
-      } else {
-        await publishHarvestLog(apiFetch, log.id, {
-          quantity: log.quantity,
-          unit: log.unit,
-        });
-      }
-      reload();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : (err as Error).message);
-    } finally {
-      setSharingId(null);
-    }
-  };
+  if (notConnected) {
+    return <ConnectGoodRoots />;
+  }
+
+  const selectedCrop = crops?.find((c) => c.id === selectedCropId) ?? null;
 
   return (
     <section className="space-y-6">
@@ -142,7 +183,7 @@ export default function Garden(): ReactElement {
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold text-foreground">Garden</h1>
           <p className="text-muted-foreground">
-            Log harvests, track yield by crop, and watch your cost per unit.
+            Log harvests to Good Roots per crop, track yield, and watch your cost per unit.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -152,6 +193,7 @@ export default function Garden(): ReactElement {
           <button
             type="button"
             className="btn-primary"
+            disabled={!crops || crops.length === 0}
             onClick={() => {
               setCreateError(null);
               setCreateOpen(true);
@@ -231,112 +273,104 @@ export default function Garden(): ReactElement {
         </section>
       )}
 
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground">From</span>
-          <input
-            type="date"
-            className="input w-auto py-1.5"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground">To</span>
-          <input
-            type="date"
-            className="input w-auto py-1.5"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-          />
-        </label>
-        {(from || to) && (
-          <button
-            type="button"
-            className="btn-ghost btn-sm"
-            onClick={() => {
-              setFrom('');
-              setTo('');
-            }}
-          >
-            Clear
-          </button>
-        )}
-      </div>
-
-      {error && <p className="form-error">{error}</p>}
-      {logs === null && !error && <p className="text-muted-foreground">Loading...</p>}
-      {logs && logs.length === 0 && (
-        <p className="text-muted-foreground text-sm">No harvests match these filters.</p>
-      )}
-      {logs && logs.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Harvested</th>
-                <th>Crop</th>
-                <th>Quantity</th>
-                <th>Good Roots</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {logs.map((log) => {
-                const shared = log.listing && log.listing.status !== 'expired';
-                return (
-                  <tr key={log.id}>
-                    <td className="text-muted-foreground">{formatShortDate(log.date)}</td>
-                    <td className="font-medium text-foreground">{log.crop}</td>
-                    <td>
-                      {log.quantity.toLocaleString()} {log.unit}
-                    </td>
-                    <td>
-                      {log.listing ? (
-                        <StatusBadge
-                          label={log.listing.status}
-                          tone={listingTone(log.listing.status)}
-                        />
-                      ) : (
-                        <span className="text-muted-foreground text-sm">Not shared</span>
-                      )}
-                    </td>
-                    <td className="text-right whitespace-nowrap">
-                      <button
-                        type="button"
-                        className="btn-link"
-                        onClick={() => void handleToggleShare(log)}
-                        disabled={
-                          sharingId === log.id || log.listing?.status === 'claimed'
-                        }
-                        title={
-                          log.listing?.status === 'claimed'
-                            ? 'Claimed listings cannot be unshared'
-                            : undefined
-                        }
-                      >
-                        {sharingId === log.id
-                          ? 'Working...'
-                          : shared
-                            ? 'Unshare'
-                            : 'Share to Good Roots'}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-link text-error-600 hover:text-error-700 ml-3"
-                        onClick={() => void handleDelete(log.id)}
-                        disabled={deletingId === log.id}
-                      >
-                        {deletingId === log.id ? 'Removing...' : 'Delete'}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="flex items-end gap-3">
+            <h2 className="text-lg font-semibold text-foreground">Harvest log</h2>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted-foreground">Crop</span>
+              <select
+                className="input w-auto py-1.5"
+                value={selectedCropId}
+                onChange={(e) => setSelectedCropId(e.target.value)}
+                disabled={!crops || crops.length === 0}
+              >
+                {crops?.length ? (
+                  crops.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {cropLabel(c)}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No crops yet</option>
+                )}
+              </select>
+            </label>
+          </div>
+          {selectedCrop && (
+            <button
+              type="button"
+              className="btn-secondary w-auto"
+              onClick={() => {
+                setShareError(null);
+                setShareResult(null);
+                setShareOpen(true);
+              }}
+            >
+              Share surplus
+            </button>
+          )}
         </div>
-      )}
+
+        {error && <p className="form-error">{error}</p>}
+
+        {!error && crops !== null && crops.length === 0 && (
+          <p className="text-muted-foreground text-sm">
+            No crops in your library yet. Add crops on the{' '}
+            <Link to="/beds" className="text-primary-600 hover:underline">
+              Beds &amp; crops
+            </Link>{' '}
+            page to start logging harvests.
+          </p>
+        )}
+
+        {harvestsError && <p className="form-error">{harvestsError}</p>}
+        {selectedCropId && harvests === null && !harvestsError && (
+          <p className="text-muted-foreground">Loading...</p>
+        )}
+        {harvests && (
+          <>
+            <p className="text-sm text-muted-foreground">
+              {harvests.harvestCount.toLocaleString()} harvest
+              {harvests.harvestCount === 1 ? '' : 's'} · {' '}
+              <span className="font-medium text-foreground">
+                {harvests.totalHarvested.toLocaleString()}
+              </span>{' '}
+              total
+            </p>
+            {harvests.harvests.length === 0 ? (
+              <p className="text-muted-foreground text-sm">
+                No harvests recorded for this crop yet.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Harvested</th>
+                      <th>Amount</th>
+                      <th>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {harvests.harvests.map((h: HarvestItem) => (
+                      <tr key={h.id}>
+                        <td className="text-muted-foreground">
+                          {formatShortDate(h.harvestedOn)}
+                        </td>
+                        <td>
+                          {h.amount.toLocaleString()} {h.unit ?? ''}
+                        </td>
+                        <td className="text-muted-foreground">{h.notes ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </section>
 
       <Modal
         open={createOpen}
@@ -346,11 +380,28 @@ export default function Garden(): ReactElement {
         <RegisterHarvestForm
           busy={createBusy}
           serverError={createError}
-          beds={beds}
-          crops={crops}
-          onSubmit={(p) => void handleCreate(p)}
+          crops={crops ?? []}
+          initialCropLibraryId={selectedCropId}
+          onSubmit={(id, p) => void handleCreate(id, p)}
           onCancel={() => setCreateOpen(false)}
         />
+      </Modal>
+
+      <Modal
+        open={shareOpen}
+        title="Share surplus"
+        onClose={() => (!shareBusy ? setShareOpen(false) : undefined)}
+      >
+        {selectedCrop && (
+          <ShareSurplusForm
+            crop={selectedCrop}
+            busy={shareBusy}
+            serverError={shareError}
+            result={shareResult}
+            onSubmit={(p) => void handleShare(selectedCrop.id, p)}
+            onClose={() => setShareOpen(false)}
+          />
+        )}
       </Modal>
     </section>
   );
@@ -371,5 +422,159 @@ function Tile({
       <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
       <span className={`text-2xl font-semibold mt-1 block ${valueColor}`}>{value}</span>
     </div>
+  );
+}
+
+function ShareSurplusForm({
+  crop,
+  busy,
+  serverError,
+  result,
+  onSubmit,
+  onClose,
+}: {
+  crop: GrowerCrop;
+  busy: boolean;
+  serverError: string | null;
+  result: GrnListing | null;
+  onSubmit: (payload: PublishCropSurplusRequest) => void;
+  onClose: () => void;
+}): ReactElement {
+  const [amount, setAmount] = useState('');
+  const [availableEnd, setAvailableEnd] = useState('');
+  const [pickupNotes, setPickupNotes] = useState('');
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  const label = crop.variety ? `${crop.name} · ${crop.variety}` : crop.name;
+
+  // Once a listing comes back, show its status instead of the form.
+  if (result) {
+    return (
+      <div className="card card-body space-y-3 max-w-2xl">
+        <p className="text-sm text-foreground">
+          Surplus shared for <span className="font-medium">{label}</span>.
+        </p>
+        <div className="card card-body space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <span className="font-medium text-foreground">{result.crop}</span>
+            <StatusBadge label={result.status} tone={listingTone(result.status)} />
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {result.quantity.toLocaleString()} {result.unit}
+          </p>
+          {result.note && <p className="text-sm text-muted-foreground">{result.note}</p>}
+          <div className="text-xs text-muted-foreground border-t border-border pt-2 space-y-0.5">
+            <p>Listed {formatShortDate(result.publishedAt)}</p>
+            {result.expiresAt && <p>Expires {formatShortDate(result.expiresAt)}</p>}
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <Link to="/good-roots" className="btn-secondary w-auto">
+            View listings
+          </Link>
+          <button type="button" className="btn-primary" onClick={onClose}>
+            Done
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const submit = (): void => {
+    setValidationError(null);
+    const payload: PublishCropSurplusRequest = {};
+    if (amount.trim().length > 0) {
+      const value = Number(amount);
+      if (!Number.isFinite(value) || value <= 0) {
+        setValidationError('Amount must be a positive number.');
+        return;
+      }
+      payload.amount = value;
+    }
+    if (availableEnd) payload.availableEnd = availableEnd;
+    const notes = pickupNotes.trim();
+    if (notes.length > 0) payload.pickupNotes = notes;
+    onSubmit(payload);
+  };
+
+  return (
+    <div className="card card-body space-y-3 max-w-2xl">
+      <p className="text-sm text-muted-foreground">
+        Share surplus from <span className="font-medium text-foreground">{label}</span> with the
+        Good Roots community.
+      </p>
+      <label className="block">
+        <span className="field-label">Amount</span>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          className="input"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="Optional — defaults to your available surplus"
+          disabled={busy}
+        />
+      </label>
+      <label className="block">
+        <span className="field-label">Available until</span>
+        <input
+          type="date"
+          className="input"
+          value={availableEnd}
+          onChange={(e) => setAvailableEnd(e.target.value)}
+          disabled={busy}
+        />
+      </label>
+      <label className="block">
+        <span className="field-label">Pickup note</span>
+        <input
+          type="text"
+          className="input"
+          value={pickupNotes}
+          onChange={(e) => setPickupNotes(e.target.value)}
+          placeholder="Optional — e.g. porch pickup after 5pm"
+          disabled={busy}
+        />
+      </label>
+
+      {validationError && <p className="form-error">{validationError}</p>}
+      {serverError && <p className="form-error">{serverError}</p>}
+
+      <div className="flex justify-end gap-2 pt-2">
+        <button type="button" className="btn-secondary" onClick={onClose} disabled={busy}>
+          Cancel
+        </button>
+        <button type="button" className="btn-primary" onClick={submit} disabled={busy}>
+          {busy ? 'Sharing...' : 'Share surplus'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ConnectGoodRoots(): ReactElement {
+  return (
+    <section className="space-y-6">
+      <header className="space-y-1">
+        <h1 className="text-2xl font-semibold text-foreground">Garden</h1>
+        <p className="text-muted-foreground">
+          Log harvests to Good Roots per crop, track yield, and watch your cost per unit.
+        </p>
+      </header>
+      <div className="card card-body text-center py-16 space-y-4">
+        <div className="text-4xl" aria-hidden>
+          🌱
+        </div>
+        <h2 className="text-lg font-semibold text-foreground">Connect Good Roots</h2>
+        <p className="text-muted-foreground max-w-md mx-auto">
+          Good Roots isn&apos;t connected to this homestead yet. Once connected, you can log
+          harvests against your crops, track yield, and share surplus with your community.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Ask your administrator to enable the Good Roots Network integration to get started.
+        </p>
+      </div>
+    </section>
   );
 }

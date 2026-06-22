@@ -802,55 +802,47 @@ export interface PnlStats {
   produceValue?: number;
 }
 
-// --- Garden: harvest logs ----------------------------------------------
+// --- Garden: GRN per-crop harvests -------------------------------------
 
-// A logged garden harvest. quantity is in `unit` (e.g. lb, count, bunch); crop
-// names the produce. cost (optional) lets the garden view compute cost/yield.
-// cropLibraryId links the harvest to a Good Roots grower-crop when one was
-// chosen from the crop library; cropName mirrors that crop's display name.
-export interface HarvestLog {
+// A single harvest recorded against a Good Roots crop, from
+// GET /grn/crops/{cropLibraryId}/harvests. amount is in `unit` (e.g. lb,
+// count, bunch); harvestedOn is the harvest date. GRN harvests are read-only
+// once recorded — there is no edit or delete.
+export interface HarvestItem {
   id: string;
-  crop: string;
-  quantity: number;
-  unit: string;
-  date: string;
-  bedId: string | null;
-  note: string | null;
-  cost: number | null;
-  // Estimated market value of the harvest, when the backend can value it.
-  value: number | null;
-  // Good Roots grower-crop linkage, when the harvest was logged against the
-  // GRN crop library rather than free text.
-  cropLibraryId: string | null;
-  cropName: string | null;
-  // Set when this harvest's surplus has been shared to Good Roots.
-  listing: GrnListing | null;
-  createdAt: string;
+  amount: number;
+  harvestedOn: string;
+  unit?: string | null;
+  notes?: string | null;
 }
 
-export interface HarvestLogListResponse {
-  harvest_logs: HarvestLog[];
+// GET /grn/crops/{cropLibraryId}/harvests — the crop's GRN harvest log plus a
+// running total and harvest count.
+export interface HarvestLogResponse {
+  growerCropId: string;
+  totalHarvested: number;
+  harvestCount: number;
+  harvests: HarvestItem[];
 }
 
-// POST /harvest-logs — record a harvest. crop and quantity are required; unit
-// defaults server-side; date defaults to today; bedId/note/cost are optional.
-// cropLibraryId links the harvest to a Good Roots grower-crop (crop carries the
-// display name) when selected from the crop library.
-export interface CreateHarvestLogRequest {
-  crop: string;
-  quantity: number;
+// POST /grn/crops/{cropLibraryId}/harvests — record a harvest against a crop.
+// amount is required and must be > 0; unit/harvestedOn/notes are optional
+// (harvestedOn defaults server-side to today).
+export interface RecordCropHarvestRequest {
+  amount: number;
   unit?: string;
-  date?: string;
-  bedId?: string;
-  note?: string;
-  cost?: number;
-  cropLibraryId?: string;
+  harvestedOn?: string;
+  notes?: string;
 }
 
-export interface HarvestLogFilters {
-  from?: string;
-  to?: string;
-  crop?: string;
+// POST /grn/crops/{cropLibraryId}/publish-surplus — share a crop's surplus to
+// the Good Roots community. All fields optional; amount defaults to the crop's
+// available surplus server-side.
+export interface PublishCropSurplusRequest {
+  amount?: number;
+  availableEnd?: string;
+  pickupNotes?: string;
+  varietyId?: string;
 }
 
 // --- Garden: stats ------------------------------------------------------
@@ -879,11 +871,12 @@ export interface GardenStats {
 
 export type GrnListingStatus = 'active' | 'claimed' | 'expired';
 
-// A surplus listing shared to the Good Roots community. Mirrors the share
-// created by POST /harvest-logs/{id}/publish.
+// A surplus listing shared to the Good Roots community. Created by sharing a
+// crop's surplus via POST /grn/crops/{cropLibraryId}/publish-surplus.
 export interface GrnListing {
   id: string;
-  harvestLogId: string | null;
+  // Originating crop-library id, when the listing was shared from a crop.
+  growerCropId?: string | null;
   crop: string;
   quantity: number;
   unit: string;
