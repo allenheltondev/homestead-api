@@ -101,6 +101,26 @@
               }
             }
           ]
+        },
+        {
+          "name": "Crop",
+          "values": [
+            { "id": "tomatoes", "name": { "value": "tomatoes", "synonyms": ["tomato", "tomatoes", "cherry tomatoes"] } },
+            { "id": "squash", "name": { "value": "squash", "synonyms": ["squash", "zucchini", "summer squash", "winter squash"] } },
+            { "id": "cucumbers", "name": { "value": "cucumbers", "synonyms": ["cucumber", "cucumbers", "cukes"] } },
+            { "id": "peppers", "name": { "value": "peppers", "synonyms": ["pepper", "peppers", "bell peppers", "hot peppers"] } },
+            { "id": "lettuce", "name": { "value": "lettuce", "synonyms": ["lettuce", "salad greens"] } },
+            { "id": "kale", "name": { "value": "kale", "synonyms": ["kale", "greens", "leafy greens"] } },
+            { "id": "beans", "name": { "value": "beans", "synonyms": ["bean", "beans", "green beans", "string beans"] } },
+            { "id": "peas", "name": { "value": "peas", "synonyms": ["pea", "peas", "snap peas"] } },
+            { "id": "carrots", "name": { "value": "carrots", "synonyms": ["carrot", "carrots"] } },
+            { "id": "potatoes", "name": { "value": "potatoes", "synonyms": ["potato", "potatoes", "spuds"] } },
+            { "id": "onions", "name": { "value": "onions", "synonyms": ["onion", "onions"] } },
+            { "id": "garlic", "name": { "value": "garlic", "synonyms": ["garlic"] } },
+            { "id": "corn", "name": { "value": "corn", "synonyms": ["corn", "sweet corn"] } },
+            { "id": "berries", "name": { "value": "berries", "synonyms": ["berry", "berries", "strawberries", "blueberries", "raspberries"] } },
+            { "id": "herbs", "name": { "value": "herbs", "synonyms": ["herb", "herbs", "basil", "cilantro", "parsley"] } }
+          ]
         }
       ],
       "intents": [
@@ -446,6 +466,84 @@
           ]
         },
         {
+          "name": "LogHarvestIntent",
+          "slots": [
+            { "name": "crop", "type": "Crop" },
+            { "name": "quantity", "type": "AMAZON.NUMBER" },
+            { "name": "unit", "type": "AMAZON.SearchQuery" },
+            { "name": "date", "type": "AMAZON.DATE" }
+          ],
+          "samples": [
+            "I harvested {quantity} pounds of {crop} {date}",
+            "I harvested {quantity} pounds of {crop}",
+            "I picked {quantity} {unit} of {crop}",
+            "log {quantity} pounds of {crop}",
+            "record a harvest of {quantity} pounds of {crop}",
+            "I harvested {quantity} {crop}",
+            "I picked some {crop}",
+            "log a harvest",
+            "record a harvest",
+            "log a garden harvest"
+          ]
+        },
+        {
+          "name": "GetGardenStatsIntent",
+          "slots": [
+            { "name": "period", "type": "AMAZON.SearchQuery" }
+          ],
+          "samples": [
+            "how much have I harvested {period}",
+            "what are my garden stats {period}",
+            "how is my garden doing",
+            "how much did I harvest this month",
+            "garden stats",
+            "garden harvest stats"
+          ]
+        },
+        {
+          "name": "ShareSurplusIntent",
+          "slots": [
+            { "name": "crop", "type": "Crop" },
+            { "name": "quantity", "type": "AMAZON.NUMBER" }
+          ],
+          "samples": [
+            "share my extra {crop}",
+            "share my surplus {crop}",
+            "share {quantity} pounds of {crop} with the community",
+            "share my extra {crop} with the good roots network",
+            "post my surplus {crop}",
+            "give away my extra {crop}",
+            "share my surplus produce",
+            "share my surplus",
+            "share my extra produce"
+          ]
+        },
+        {
+          "name": "GetGrnListingsIntent",
+          "samples": [
+            "did anyone claim my produce",
+            "did anyone claim my surplus",
+            "what are my good roots network listings",
+            "what have I shared with the community",
+            "did anyone take my extra produce",
+            "check my listings",
+            "my good roots network listings",
+            "who claimed my produce"
+          ]
+        },
+        {
+          "name": "GetGrnRequestsIntent",
+          "samples": [
+            "what does the community need",
+            "what is the community looking for",
+            "what are people requesting",
+            "what does the good roots network need",
+            "what does my community need",
+            "community requests",
+            "what is the neighborhood asking for"
+          ]
+        },
+        {
           "name": "CatchAllIntent",
           "slots": [
             { "name": "query", "type": "AMAZON.SearchQuery" }
@@ -729,6 +827,59 @@
               "prompts": { "elicitation": "Elicit.Slot.careTask" }
             }
           ]
+        },
+        {
+          "name": "LogHarvestIntent",
+          "confirmationRequired": true,
+          "prompts": { "confirmation": "Confirm.Intent.LogHarvest" },
+          "slots": [
+            {
+              "name": "crop",
+              "type": "Crop",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.harvestCrop" }
+            },
+            {
+              "name": "quantity",
+              "type": "AMAZON.NUMBER",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.harvestQuantity" }
+            },
+            {
+              "name": "unit",
+              "type": "AMAZON.SearchQuery",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            },
+            {
+              "name": "date",
+              "type": "AMAZON.DATE",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            }
+          ]
+        },
+        {
+          "name": "ShareSurplusIntent",
+          "confirmationRequired": true,
+          "prompts": { "confirmation": "Confirm.Intent.ShareSurplus" },
+          "slots": [
+            {
+              "name": "crop",
+              "type": "Crop",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.surplusCrop" }
+            },
+            {
+              "name": "quantity",
+              "type": "AMAZON.NUMBER",
+              "confirmationRequired": false,
+              "elicitationRequired": false
+            }
+          ]
         }
       ]
     },
@@ -869,6 +1020,36 @@
         "id": "Confirm.Intent.CompleteCareTask",
         "variations": [
           { "type": "PlainText", "value": "Mark {task} complete. Is that right?" }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.harvestCrop",
+        "variations": [
+          { "type": "PlainText", "value": "What did you harvest? For example tomatoes, squash, or kale." }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.harvestQuantity",
+        "variations": [
+          { "type": "PlainText", "value": "How much did you harvest, in pounds?" }
+        ]
+      },
+      {
+        "id": "Confirm.Intent.LogHarvest",
+        "variations": [
+          { "type": "PlainText", "value": "{quantity} pounds of {crop}. Should I log it?" }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.surplusCrop",
+        "variations": [
+          { "type": "PlainText", "value": "Which surplus crop should I share with the Good Roots Network?" }
+        ]
+      },
+      {
+        "id": "Confirm.Intent.ShareSurplus",
+        "variations": [
+          { "type": "PlainText", "value": "Share your surplus {crop} with the Good Roots Network. Should I do that?" }
         ]
       }
     ]

@@ -190,6 +190,40 @@ export const TOOL_SPECS = [
       },
     },
   },
+  {
+    toolSpec: {
+      name: "get_garden_stats",
+      description:
+        "Get garden harvest stats (total harvested and a top-crop breakdown) for an optional period.",
+      inputSchema: {
+        json: { type: "object", properties: { ...periodProperty }, required: [] },
+      },
+    },
+  },
+  {
+    toolSpec: {
+      name: "get_planting_calendar",
+      description:
+        "Get the planting and sowing calendar: what to plant, sow, or transplant and when.",
+      inputSchema: { json: { type: "object", properties: {}, required: [] } },
+    },
+  },
+  {
+    toolSpec: {
+      name: "get_grn_listings",
+      description:
+        "Get the member's surplus listings on the Good Roots Network, including whether each listing has been claimed and by whom. Use for 'did anyone claim my produce' questions.",
+      inputSchema: { json: { type: "object", properties: {}, required: [] } },
+    },
+  },
+  {
+    toolSpec: {
+      name: "get_grn_requests",
+      description:
+        "Get the community needs posted to the Good Roots Network — what other members are looking for. Use for 'what does the community need' questions.",
+      inputSchema: { json: { type: "object", properties: {}, required: [] } },
+    },
+  },
 
   // --- WRITE tools (confirm-gated; never executed inline) -----------------
   {
@@ -376,6 +410,62 @@ export const TOOL_SPECS = [
       },
     },
   },
+  {
+    toolSpec: {
+      name: "log_harvest",
+      description:
+        "Log a garden harvest. Provide the crop and the quantity harvested, and optionally the unit (pounds, ounces, pieces, bunches).",
+      inputSchema: {
+        json: {
+          type: "object",
+          properties: {
+            crop: {
+              type: "string",
+              description: "The crop harvested (e.g. tomatoes, squash, kale).",
+            },
+            quantity: {
+              type: "number",
+              description: "How much was harvested.",
+            },
+            unit: {
+              type: "string",
+              description:
+                "Optional unit (pound, ounce, kilogram, piece, bunch, basket, bushel).",
+            },
+          },
+          required: ["crop", "quantity"],
+        },
+      },
+    },
+  },
+  {
+    toolSpec: {
+      name: "publish_surplus",
+      description:
+        "Share a harvest's surplus to the Good Roots Network so other members can claim it. Provide which crop or harvest to share (a crop name or harvest id).",
+      inputSchema: {
+        json: {
+          type: "object",
+          properties: {
+            harvestRef: {
+              type: "string",
+              description:
+                "The crop name or harvest id to share (e.g. 'my extra tomatoes').",
+            },
+            quantity: {
+              type: "number",
+              description: "Optional quantity of surplus to share.",
+            },
+            unit: {
+              type: "string",
+              description: "Optional unit for the surplus quantity.",
+            },
+          },
+          required: ["harvestRef"],
+        },
+      },
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -472,6 +562,26 @@ export const REGISTRY = {
     run: (args, api) => api.getPnl(pickPeriod(args)),
     describe: () => "Get profit and loss",
   },
+  get_garden_stats: {
+    kind: "read",
+    run: (args, api) => api.getGardenStats(pickPeriod(args)),
+    describe: () => "Get garden stats",
+  },
+  get_planting_calendar: {
+    kind: "read",
+    run: (_args, api) => api.getPlantingCalendar(),
+    describe: () => "Get the planting calendar",
+  },
+  get_grn_listings: {
+    kind: "read",
+    run: (_args, api) => api.getGrnListings(),
+    describe: () => "Get your Good Roots Network listings",
+  },
+  get_grn_requests: {
+    kind: "read",
+    run: (_args, api) => api.getGrnRequests(),
+    describe: () => "Get the community's requests",
+  },
 
   // --- WRITE -------------------------------------------------------------
   log_feed_purchase: {
@@ -543,6 +653,27 @@ export const REGISTRY = {
     run: (args, api) => api.completeCareTask(textOrUndefined(args?.task)),
     describe: (args) =>
       `Mark ${args?.task ?? "that care task"} complete`,
+  },
+  log_harvest: {
+    kind: "write",
+    run: (args, api) => api.recordHarvest(cleanHarvest(args)),
+    describe: (args) => {
+      const crop = args?.crop ?? "produce";
+      const quantity = args?.quantity;
+      const unit = args?.unit ?? "pounds";
+      return quantity != null
+        ? `Log ${plural(quantity, unit)} of ${crop}`
+        : `Log a ${crop} harvest`;
+    },
+  },
+  publish_surplus: {
+    kind: "write",
+    // The agent supplies a crop/harvest reference; the harvestRef is passed
+    // as the publish target id and any quantity/unit ride along in the body.
+    run: (args, api) =>
+      api.publishSurplus(textOrUndefined(args?.harvestRef), cleanSurplus(args)),
+    describe: (args) =>
+      `Share your ${args?.harvestRef ?? "surplus"} with the Good Roots Network`,
   },
 };
 
@@ -667,6 +798,28 @@ function cleanHealthExpense(args) {
   return fields;
 }
 
+function cleanHarvest(args) {
+  const fields = {};
+  const crop = textOrUndefined(args?.crop);
+  const quantity = numberOrUndefined(args?.quantity);
+  const unit = textOrUndefined(args?.unit);
+  if (crop) fields.crop = crop;
+  if (quantity != null) {
+    fields.quantity = quantity;
+    fields.unit = unit ?? "lb";
+  }
+  return fields;
+}
+
+function cleanSurplus(args) {
+  const fields = {};
+  const quantity = numberOrUndefined(args?.quantity);
+  const unit = textOrUndefined(args?.unit);
+  if (quantity != null) fields.quantity = quantity;
+  if (unit) fields.unit = unit;
+  return fields;
+}
+
 export const __testables = {
   pickPeriod,
   pickEggCost,
@@ -675,4 +828,6 @@ export const __testables = {
   cleanDeath,
   pickWithinDays,
   cleanMilk,
+  cleanHarvest,
+  cleanSurplus,
 };
