@@ -21,6 +21,10 @@ const {
   updateGrowerBed,
   deleteGrowerBed,
   listCatalogVarieties,
+  listCropHarvests,
+  recordCropHarvest,
+  createListing,
+  updateListing,
   _resetTokenCache,
 } = grn;
 
@@ -123,5 +127,46 @@ describe("grn garden-bed client wrappers", () => {
     mockFetchOnce({ status: 204, text: "" });
     await deleteGrowerBed("b1");
     expect(global.fetch.mock.calls[0][1].method).toBe("DELETE");
+  });
+});
+
+describe("grn crop-harvest client wrappers", () => {
+  test("listCropHarvests GETs /crops/{id}/harvests", async () => {
+    mockFetchOnce({ body: { growerCropId: "gc1", totalHarvested: "5", harvestCount: 1, harvests: [] } });
+    const out = await listCropHarvests("gc1");
+    expect(out.totalHarvested).toBe("5");
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe("https://grn.example.com/crops/gc1/harvests");
+    expect(opts.method).toBe("GET");
+  });
+
+  test("recordCropHarvest POSTs /crops/{id}/harvests forwarding body + idempotency key", async () => {
+    mockFetchOnce({ status: 201, body: { harvest: { id: "h1" }, totalHarvested: "5", harvestCount: 1 } });
+    await recordCropHarvest("gc1", { amount: 5, unit: "lb" }, { idempotencyKey: "k1" });
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe("https://grn.example.com/crops/gc1/harvests");
+    expect(opts.method).toBe("POST");
+    expect(opts.headers["Idempotency-Key"]).toBe("k1");
+    expect(JSON.parse(opts.body).amount).toBe(5);
+  });
+});
+
+describe("grn listing client wrappers", () => {
+  test("createListing POSTs /listings", async () => {
+    mockFetchOnce({ status: 201, body: { id: "L1" } });
+    await createListing({ cropId: "c1" }, { idempotencyKey: "k1" });
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe("https://grn.example.com/listings");
+    expect(opts.method).toBe("POST");
+    expect(opts.headers["Idempotency-Key"]).toBe("k1");
+  });
+
+  test("updateListing PUTs /listings/{id}", async () => {
+    mockFetchOnce({ body: { id: "L1", status: "expired" } });
+    await updateListing("L1", { cropId: "c1", status: "expired" });
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe("https://grn.example.com/listings/L1");
+    expect(opts.method).toBe("PUT");
+    expect(JSON.parse(opts.body).status).toBe("expired");
   });
 });

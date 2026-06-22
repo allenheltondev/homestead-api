@@ -1,14 +1,16 @@
 # Good Roots Network (GRN) integration
 
-The garden pillar integrates two-way with the [Good Roots Network](https://github.com/allenheltondev/olivias-garden-foundation)
-(GRN) API. **GRN is the single source of truth for crops, the crop catalog, and
-garden beds** — the homestead keeps no local copies of those; it reaches them
-through authenticated pass-through routes. It also publishes surplus harvests as
-GRN listings and proxies GRN's browse / claim / request endpoints. The harvest
-log is the one garden record that stays local (it references GRN crop ids). The
-integration is **optional** — when it is not configured every GRN-backed
-endpoint returns `503 GrnNotConfigured` and the daily claim-status sync is
-skipped, so the rest of the API is unaffected.
+The garden pillar integrates with the [Good Roots Network](https://github.com/allenheltondev/olivias-garden-foundation)
+(GRN) API. **GRN is the single source of truth for crops, the crop catalog,
+garden beds, and harvests** — the homestead keeps no local copies of those; it
+reaches them through authenticated pass-through routes. GRN records harvests
+**per crop**, so the homestead no longer keeps a local harvest log. The
+homestead also publishes surplus as GRN listings (crop-level) and proxies GRN's
+browse / claim / request endpoints. The integration is **optional** — when it is
+not configured every GRN-backed endpoint returns `503 GrnNotConfigured`, the
+GRN-sourced garden stats / produce value degrade to empty (without failing the
+broader `/stats/*` endpoints), and the daily claim-status sync is skipped, so the
+rest of the API is unaffected.
 
 ## Configuration
 
@@ -53,12 +55,15 @@ granted `ssm:GetParameter` on the token path plus `kms:Decrypt` scoped (via
 
 ## Behaviour when unconfigured
 
-- Every `/grn/*` pass-through (`/grn/crops*`, `/grn/catalog/crops*`,
-  `/grn/beds*`, `/grn/my-listings`, `/grn/discover`, `/grn/requests`,
-  `/grn/claims*`) → `503 GrnNotConfigured`.
-- `POST /harvest-logs/{id}/publish`, `DELETE /harvest-logs/{id}/publish` →
-  `503 GrnNotConfigured`.
-- `GET /stats/garden` → still works; it only reads local harvest logs.
+- Every `/grn/*` pass-through (`/grn/crops*`, `/grn/crops/{id}/harvests`,
+  `/grn/crops/{id}/publish-surplus`, `/grn/catalog/crops*`, `/grn/beds*`,
+  `/grn/listings`, `/grn/listings/{id}`, `/grn/my-listings`, `/grn/discover`,
+  `/grn/requests`, `/grn/claims*`) → `503 GrnNotConfigured`.
+- `GET /stats/garden` → still responds `200` with an **empty garden**
+  (`totalLbs: 0`, `byCrop: []`); it sources harvests from GRN and degrades
+  rather than failing.
+- `GET /stats/pnl` → still responds `200`; `outputs.produceValue` degrades to
+  `0` (the rest of the P&L is unaffected).
 - The daily `AlertsFunction` claim-status sync is a no-op.
 
 ## Error mapping
@@ -86,6 +91,8 @@ validated lightly (shape/required per the GRN schemas) then sent verbatim.
 | `GET /grn/crops/{id}` | `GET /crops/{cropLibraryId}` | one grower crop. |
 | `PUT /grn/crops/{id}` | `PUT /crops/{cropLibraryId}` | update. |
 | `DELETE /grn/crops/{id}` | `DELETE /crops/{cropLibraryId}` | delete (204). |
+| `GET /grn/crops/{id}/harvests` | `GET /crops/{cropLibraryId}/harvests` | the crop's harvest log: `HarvestLogResponse {growerCropId, totalHarvested (string), harvestCount, harvests: HarvestItem[]}`. |
+| `POST /grn/crops/{id}/harvests` | `POST /crops/{cropLibraryId}/harvests` | record a harvest. body: `RecordHarvestRequest {amount* (>0), unit?, harvestedOn? (YYYY-MM-DD), notes?}` → `RecordHarvestResponse {harvest, totalHarvested, harvestCount}`. Forwards a caller `Idempotency-Key`. |
 | `GET /grn/catalog/crops` | `GET /catalog/crops` | catalog crops (`CatalogCrop[]`). |
 | `GET /grn/catalog/crops/{cropId}/varieties` | `GET /catalog/crops/{cropId}/varieties` | catalog varieties. |
 | `GET /grn/beds` | `GET /beds` | list garden beds (`GardenBed[]`). |
@@ -98,33 +105,31 @@ A `GrowerCropItem` links to the public catalog through **`canonical_id`** (the
 catalog `cropId`; the legacy `crop_id` field is deprecated) and to a variety
 through `variety_id`. The publish path below uses exactly these.
 
-### Publish / unpublish surplus
+### Publish / unpublish surplus (crop-level)
 
-- `POST /harvest-logs/{id}/publish` — builds a GRN `UpsertListingRequest` from
-  the harvest and the request body, `POST`s it to GRN `/listings` with
-  `Idempotency-Key: <harvestId>` (so retries are safe), then stores the
-  returned `grnListingId` + `grnStatus = active` on the harvest. **The catalog
-  `cropId` is resolved from the harvest's linked grower crop**, not the request
-  body: the harvest's `cropLibraryId` -> GRN `GET /crops/{id}` ->
-  `canonical_id` (cropId) + `variety_id` (varietyId). A harvest with **no**
-  `cropLibraryId` is rejected with `422` ("link this harvest to a crop before
-  sharing"), and a linked crop with no `canonical_id` is also `422`. This closes
-  the prior gap where the publish body had to carry a raw `cropId` the harvest
-  never recorded. The body supplies only the availability window (and optional
-  pickup/contact fields + a `varietyId` override):
+Surplus is published as a GRN listing tied to a crop. There is no local harvest
+log anymore, so the catalog `cropId` comes straight from the grower crop.
 
-  ```json
-  { "availableEnd": "2026-07-15", "availableStart": "2026-07-01",
-    "quantityTotal": 5, "unit": "lb", "varietyId": "<optional override>",
-    "pickupLocationText": "Front porch", "pickupDisclosurePolicy": "after_confirmed",
-    "contactPref": "in_app" }
-  ```
+| Homestead route | GRN operation | Notes |
+|-----------------|---------------|-------|
+| `POST /grn/listings` | `POST /listings` | raw `UpsertListingRequest` pass-through (required `cropId` uuid, `quantityTotal` >0, `unit`, `availableEnd`). Forwards a caller `Idempotency-Key`. |
+| `PUT /grn/listings/{id}` | `PUT /listings/{id}` | update a listing. **Unpublish** = `PUT` with `status = expired` (the GRN contract has no `DELETE /listings/{id}`). |
+| `POST /grn/crops/{id}/publish-surplus` | `POST /listings` | convenience: fetch the grower crop, use its `canonical_id` as the listing `cropId` (+ `variety_id` → `varietyId`), merge the caller body, and POST `/listings`. |
 
-  Quantity/unit/availableStart/title default from the harvest when omitted.
+The `publish-surplus` body supplies the quantity + availability window (and
+optional pickup/contact fields + a `varietyId` override):
 
-- `DELETE /harvest-logs/{id}/publish` — retires the listing upstream (the GRN
-  contract has no `DELETE /listings/{id}`, so this `PUT`s `status = expired` via
-  `updateListing`) and clears the local `grnListingId` / `grnStatus`.
+```json
+{ "amount": 5, "availableEnd": "2026-07-15", "availableStart": "2026-07-01",
+  "unit": "lb", "varietyId": "<optional override>",
+  "pickupLocationText": "Front porch", "pickupDisclosurePolicy": "after_confirmed",
+  "contactPref": "in_app" }
+```
+
+`unit` defaults to the crop's `default_unit` (else `lb`), `availableStart`
+defaults to now, and `title` defaults to the crop's `nickname` / `crop_name`. A
+crop with **no** `canonical_id` is rejected with `422` ("the crop has no catalog
+entry yet; pick a catalog crop before sharing surplus").
 
 ### Browse / claim / requests (proxies)
 
@@ -136,13 +141,24 @@ through `variety_id`. The publish path below uses exactly these.
 | `POST /grn/claims` | `POST /claims` | body: `listingId` (uuid), `quantityClaimed` (>0), optional `requestId`/`notes`. Forwards a caller `Idempotency-Key` header. |
 | `GET /grn/claims/{id}` | `GET /claims/{claimId}` | The GRN contract documents only `PUT` on this path; a read is attempted and any rejection surfaces as an upstream error. |
 
+### GRN-sourced garden stats + produce value
+
+`GET /stats/garden` and the `GET /stats/pnl` `outputs.produceValue` derive from
+GRN, not a local store: list the user's crops (`GET /crops`), fetch each crop's
+harvests (`GET /crops/{id}/harvests`), sum each harvest's `amount` by crop and
+overall, and filter by `harvestedOn` falling within the period. `produceValue =
+totalAmount × ProducePricePerLb`. The whole GRN read is wrapped: on
+`GrnNotConfigured` / `GrnUnauthorized` it returns an empty garden (`totalLbs: 0`,
+`byCrop: []`) / `produceValue 0` rather than failing `/stats/garden`,
+`/stats/summary`, or `/stats/pnl`. The `byCrop` rows carry `cropName`
+(`nickname` || `crop_name`), `cropLibraryId` (the GRN crop id), and `lbs`.
+
 ### Daily claim-status sync
 
-The scheduled `AlertsFunction` calls `GET /my/listings`, and for each locally
-linked harvest whose listing status changed it updates `grnStatus`, adds a
-`HomesteadAlert` line, and (for newly `claimed` listings) emits a
-`GrnListingClaimed` event. The whole block is wrapped in try/catch so GRN being
-unreachable never breaks the alert run.
+There is no local harvest/listing store anymore. The scheduled `AlertsFunction`
+calls `GET /my/listings?status=claimed` and, for each claimed listing, adds a
+`HomesteadAlert` line and emits a `GrnListingClaimed` event. The whole block is
+wrapped in try/catch so GRN being unreachable never breaks the alert run.
 
 ## GRN contract files mapped
 
@@ -159,5 +175,7 @@ Built against these files from the GRN OpenAPI tree
   (`UpsertRequestPayload`, `RequestResponse`), `schemas/catalog.yaml`
   (`CatalogCrop`, `CatalogVariety`), `schemas/crop-library.yaml`
   (`UpsertGrowerCropRequest`, `GrowerCropItem` — `canonical_id` is the catalog
-  cropId link, `crop_id` deprecated), `schemas/garden.yaml`
+  cropId link, `crop_id` deprecated, `default_unit` seeds publish-surplus;
+  `RecordHarvestRequest`, `RecordHarvestResponse`, `HarvestLogResponse`,
+  `HarvestItem` for the per-crop harvest log), `schemas/garden.yaml`
   (`UpsertGardenBedRequest`, `GardenBed`)

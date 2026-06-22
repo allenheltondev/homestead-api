@@ -2,6 +2,8 @@ import { QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { TABLE_NAME, ddb } from "../services/ddb.mjs";
 import { yyyymm } from "../services/time.mjs";
 import { isPoultryType } from "../validation/feed.mjs";
+import { listGrowerCrops, listCropHarvests } from "../lib/grn.mjs";
+import { GrnNotConfiguredError, GrnUnauthorizedError } from "../services/errors.mjs";
 
 // Default store price per dozen when neither the query param nor the
 // STORE_EGG_PRICE_PER_DOZEN env var supplies one.
@@ -1232,83 +1234,84 @@ export async function growoutStats(months) {
 }
 
 // --- Garden / harvest analytics ----------------------------------------
-// Harvest logs partition by month on the base table (pk = HARVEST#<yyyy-mm>).
-// We Query each month in the period and aggregate quantity by crop name (the
-// denormalized display name on each log), surfacing the GRN grower-crop id
-// (cropLibraryId) when a log is linked. Garden bed structure + crops now live
-// in the Good Roots Network, so there is no local planting/bed join. Weight
-// units (lb/oz) normalize to pounds; count units (each/bunch) are summed
-// separately so the byCrop totals stay honest. All reads Query known month
-// partitions -- no Scans.
+// Harvests now live in the Good Roots Network (GRN), recorded per crop. We list
+// the user's crops (GET /crops), fetch each crop's harvest log
+// (GET /crops/{id}/harvests), sum the `amount` (a string) by crop and overall,
+// filtering by `harvestedOn` within the period. There is no local harvest store
+// or planting/bed join. Everything is wrapped so GRN being unconfigured /
+// unauthorized degrades to an empty garden (it never fails /stats/garden,
+// /stats/summary, or /stats/pnl) -- see grnGarden() below.
 
-// Conversion to pounds for the weight units. Count units (each/bunch) are not
-// weights, so they are tracked under `countByCrop` instead of `totalLbs`.
-const HARVEST_LBS_PER = {
-  lb: 1,
-  oz: 1 / 16,
-};
-
-function harvestLbs(quantity, unit) {
-  const factor = HARVEST_LBS_PER[unit];
-  if (factor === undefined) return 0;
-  return (Number(quantity) || 0) * factor;
+// Whether an ISO YYYY-MM-DD `harvestedOn` falls within the period's months.
+// `months` are YYYY-MM buckets; a harvest counts when its YYYY-MM prefix is in
+// the set. A missing/invalid date is excluded so the totals stay honest.
+function harvestedOnInPeriod(harvestedOn, monthSet) {
+  if (typeof harvestedOn !== "string" || harvestedOn.length < 7) return false;
+  return monthSet.has(harvestedOn.slice(0, 7));
 }
 
-// Queries every HARVEST#<yyyy-mm> partition in the months list (no Scan) and
-// returns the flat list of log rows.
-async function harvestLogsForMonths(months) {
-  const batches = await Promise.all(
-    months.map((month) =>
-      queryAll({
-        TableName: TABLE_NAME,
-        KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
-        ExpressionAttributeValues: {
-          ":pk": `HARVEST#${month}`,
-          ":sk": "LOG#",
-        },
-      }),
-    ),
+// Reads the user's crops from GRN and fans out one harvest-log fetch per crop,
+// returning a flat list of {crop, harvests} pairs. Throws the typed GRN errors
+// (GrnNotConfigured / GrnUnauthorized) up to gardenStats, which degrades.
+async function grnCropHarvests(correlationId) {
+  const cropsResult = await listGrowerCrops({ correlationId });
+  const crops = Array.isArray(cropsResult) ? cropsResult : (cropsResult?.items ?? []);
+  if (!Array.isArray(crops) || crops.length === 0) return [];
+
+  return Promise.all(
+    crops.map(async (crop) => {
+      const log = await listCropHarvests(crop.id, { correlationId });
+      const harvests = Array.isArray(log?.harvests) ? log.harvests : [];
+      return { crop, harvests };
+    }),
   );
-  return batches.flat();
 }
 
-// GET /stats/garden — harvest totals by crop name (pounds + counts) for the
-// period, surfacing the GRN grower-crop id (cropLibraryId) when the crop's logs
-// are linked to one. Crops + garden beds live in the Good Roots Network now, so
-// there is no local planting/bed join.
-export async function gardenStats(period, months) {
-  const logs = await harvestLogsForMonths(months);
+// An empty garden-stats payload. Returned (instead of failing) whenever GRN is
+// unconfigured / unauthorized so the broader /stats endpoints keep working.
+function emptyGarden(period) {
+  return { period, totalLbs: 0, byCrop: [] };
+}
 
-  const byCropMap = {};
-  let totalLbs = 0;
+// GET /stats/garden — harvest totals by crop for the period, sourced from GRN.
+// Each crop's display name comes from the grower crop (nickname || crop_name),
+// its GRN crop-library id is surfaced as `cropLibraryId`, and `lbs` is the sum
+// of harvest `amount` for harvests whose `harvestedOn` falls in the period.
+// (Amounts are unit-agnostic in GRN; the prior oz->lb normalization is gone.)
+// Degrades to an empty garden when GRN is not configured / unauthorized.
+export async function gardenStats(period, months, { correlationId } = {}) {
+  const monthSet = new Set(months);
 
-  for (const log of logs) {
-    const crop = typeof log.cropName === "string" && log.cropName.length > 0
-      ? log.cropName
-      : "unknown";
-    const lbs = harvestLbs(log.quantity, log.unit);
-    const isCount = log.unit === "each" || log.unit === "bunch";
-
-    if (!byCropMap[crop]) byCropMap[crop] = { lbs: 0, count: 0, cropLibraryId: null };
-    byCropMap[crop].lbs += lbs;
-    if (isCount) byCropMap[crop].count += Number(log.quantity) || 0;
-    // Surface the GRN grower-crop id when a log carries one. First non-empty
-    // wins so a crop linked on at least one log reports its cropLibraryId.
-    if (byCropMap[crop].cropLibraryId === null
-      && typeof log.cropLibraryId === "string" && log.cropLibraryId.length > 0) {
-      byCropMap[crop].cropLibraryId = log.cropLibraryId;
+  let cropHarvests;
+  try {
+    cropHarvests = await grnCropHarvests(correlationId);
+  } catch (err) {
+    if (err instanceof GrnNotConfiguredError || err instanceof GrnUnauthorizedError) {
+      return emptyGarden(period);
     }
-    totalLbs += lbs;
+    throw err;
   }
 
-  const byCrop = Object.entries(byCropMap)
-    .map(([cropName, v]) => ({
-      cropName,
-      cropLibraryId: v.cropLibraryId,
-      lbs: v.lbs,
-      count: v.count,
-    }))
-    .sort((a, b) => b.lbs - a.lbs || a.cropName.localeCompare(b.cropName));
+  const byCrop = [];
+  let totalLbs = 0;
+
+  for (const { crop, harvests } of cropHarvests) {
+    let cropLbs = 0;
+    for (const h of harvests) {
+      if (!harvestedOnInPeriod(h?.harvestedOn, monthSet)) continue;
+      cropLbs += Number(h?.amount) || 0;
+    }
+    if (cropLbs === 0) continue;
+
+    const cropName = typeof crop?.nickname === "string" && crop.nickname.trim().length > 0
+      ? crop.nickname.trim()
+      : (typeof crop?.crop_name === "string" && crop.crop_name.length > 0 ? crop.crop_name : "unknown");
+
+    byCrop.push({ cropName, cropLibraryId: crop?.id ?? null, lbs: cropLbs, count: 0 });
+    totalLbs += cropLbs;
+  }
+
+  byCrop.sort((a, b) => b.lbs - a.lbs || a.cropName.localeCompare(b.cropName));
 
   return { period, totalLbs, byCrop };
 }
@@ -1364,7 +1367,9 @@ export async function pnlStats(period, months, options = {}) {
   const eggsValue = eggs.dozens * eggPrice;
   const milkValue = milk.totalGallons * milkPrice;
   const meatValue = growout.dressedWeightLbsTotal * meatPrice;
-  // Garden produce valued at harvest pounds x the produce price (0 by default).
+  // Garden produce valued at GRN-sourced harvest amount x the produce price (0
+  // by default). gardenStats degrades to totalLbs 0 when GRN is unconfigured /
+  // unauthorized, so produceValue is 0 and the rest of the P&L is unaffected.
   const produceValue = garden.totalLbs * producePrice;
 
   const outputs = eggsValue + milkValue + meatValue + produceValue + salesRevenue;
