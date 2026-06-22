@@ -158,3 +158,7 @@ export async function getCareDue(apiFetch: ApiFetch): Promise<CareDueStats> {
 export async function getPnl(apiFetch: ApiFetch, period?: string): Promise<PnlStats> {
   return apiFetch<PnlStats>('/stats/pnl', { query: { period } });
 }
+
+// Garden stats live in api/garden.ts; re-exported here so callers can keep
+// importing analytics from a single `api/stats` module.
+export { getGardenStats, getPlantingCalendar } from './garden';

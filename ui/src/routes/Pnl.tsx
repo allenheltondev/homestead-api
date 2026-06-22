@@ -198,6 +198,19 @@ function PnlSummary({ pnl }: { pnl: PnlStats }): ReactElement {
         />
       </div>
 
+      {/* Garden produce value — the estimated worth of harvested produce, shown
+          additively when the backend can value it (it may not be counted as
+          cash revenue above). */}
+      {pnl.produceValue != null && pnl.produceValue > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Tile
+            label="Produce value (est.)"
+            value={formatMoney(pnl.produceValue)}
+            accent="success"
+          />
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <section className="space-y-3">
           <h2 className="text-lg font-semibold text-foreground">Costs vs. revenue</h2>

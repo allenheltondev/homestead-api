@@ -54,6 +54,12 @@ function NavItems({
       <NavLink to="/health" className={className} onClick={onNavigate}>
         Health
       </NavLink>
+      <NavLink to="/garden" className={className} onClick={onNavigate}>
+        Garden
+      </NavLink>
+      <NavLink to="/good-roots" className={className} onClick={onNavigate}>
+        Good Roots
+      </NavLink>
       <NavLink to="/pnl" className={className} onClick={onNavigate}>
         P&amp;L
       </NavLink>
