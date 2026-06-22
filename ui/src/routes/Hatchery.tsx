@@ -22,6 +22,7 @@ import type {
   IncubationBatch,
 } from '../api/types';
 import Modal from '../components/Modal';
+import PageHeader from '../components/PageHeader';
 import { formatShortDate } from '../components/format';
 
 function daysUntil(dueDate: string | null): number | null {
@@ -214,12 +215,10 @@ export default function Hatchery(): ReactElement {
 
   return (
     <section className="space-y-8">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold text-foreground">Hatchery &amp; breeding</h1>
-        <p className="text-muted-foreground">
-          Incubation batches, upcoming kiddings, and grow-out flocks.
-        </p>
-      </header>
+      <PageHeader
+        title="Hatchery & breeding"
+        subtitle="Incubation batches, upcoming kiddings, and grow-out flocks."
+      />
 
       {error && <p className="form-error">{error}</p>}
 

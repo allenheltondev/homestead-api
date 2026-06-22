@@ -14,6 +14,7 @@ import type {
   CreateCareTaskRequest,
 } from '../api/types';
 import Modal from '../components/Modal';
+import PageHeader from '../components/PageHeader';
 import { formatShortDate } from '../components/format';
 
 const CADENCES: CareTaskCadence[] = ['once', 'daily', 'weekly', 'monthly', 'yearly'];
@@ -104,24 +105,22 @@ export default function Care(): ReactElement {
 
   return (
     <section className="space-y-6">
-      <header className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold text-foreground">Care schedule</h1>
-          <p className="text-muted-foreground">
-            Recurring tasks with due dates and due-soon highlighting.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => {
-            setCreateError(null);
-            setCreateOpen(true);
-          }}
-        >
-          Add task
-        </button>
-      </header>
+      <PageHeader
+        title="Care schedule"
+        subtitle="Recurring tasks with due dates and due-soon highlighting."
+        actions={
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => {
+              setCreateError(null);
+              setCreateOpen(true);
+            }}
+          >
+            Add task
+          </button>
+        }
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-sm">

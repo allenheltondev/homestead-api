@@ -7,6 +7,7 @@ import { recordBirth } from '../api/lifecycle';
 import { listPastures } from '../api/pastures';
 import type { Animal, AnimalStatus, Pasture, RecordBirthRequest } from '../api/types';
 import RecordBirthModal from '../components/RecordBirthModal';
+import PageHeader from '../components/PageHeader';
 import { ageLabel } from '../components/format';
 
 export default function Animals(): ReactElement {
@@ -92,24 +93,27 @@ export default function Animals(): ReactElement {
 
   return (
     <section className="space-y-4">
-      <header className="flex items-start justify-between gap-4">
-        <h1 className="text-2xl font-semibold text-foreground">Animals</h1>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => {
-              setBirthError(null);
-              setBirthOpen(true);
-            }}
-          >
-            Record birth
-          </button>
-          <Link to="/animals/new" className="btn-primary">
-            Register animal
-          </Link>
-        </div>
-      </header>
+      <PageHeader
+        title="Animals"
+        subtitle="Your herd and flock, with species, status, and pasture filters."
+        actions={
+          <>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                setBirthError(null);
+                setBirthOpen(true);
+              }}
+            >
+              Record birth
+            </button>
+            <Link to="/animals/new" className="btn-primary">
+              Register animal
+            </Link>
+          </>
+        }
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-sm">

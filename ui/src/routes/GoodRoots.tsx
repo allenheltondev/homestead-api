@@ -17,6 +17,7 @@ import type {
 } from '../api/types';
 import Modal from '../components/Modal';
 import StatusBadge from '../components/StatusBadge';
+import PageHeader from '../components/PageHeader';
 import { listingTone } from '../components/statusTone';
 import { formatShortDate } from '../components/format';
 
@@ -150,12 +151,10 @@ export default function GoodRoots(): ReactElement {
 
   return (
     <section className="space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold text-foreground">Good Roots Network</h1>
-        <p className="text-muted-foreground">
-          Share your surplus and find produce from homesteads near you.
-        </p>
-      </header>
+      <PageHeader
+        title="Good Roots Network"
+        subtitle="Share your surplus and find produce from homesteads near you."
+      />
 
       <div className="border-b border-border flex gap-1" role="tablist" aria-label="Good Roots sections">
         {TABS.map((t) => (
@@ -226,12 +225,10 @@ export default function GoodRoots(): ReactElement {
 function ConnectGoodRoots(): ReactElement {
   return (
     <section className="space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold text-foreground">Good Roots Network</h1>
-        <p className="text-muted-foreground">
-          Share your surplus and find produce from homesteads near you.
-        </p>
-      </header>
+      <PageHeader
+        title="Good Roots Network"
+        subtitle="Share your surplus and find produce from homesteads near you."
+      />
       <div className="card card-body text-center py-16 space-y-4">
         <div className="text-4xl" aria-hidden>
           🌱

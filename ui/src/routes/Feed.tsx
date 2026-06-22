@@ -19,6 +19,7 @@ import Modal from '../components/Modal';
 import RegisterFeedPurchaseForm from '../components/RegisterFeedPurchaseForm';
 import RegisterFeedUsageForm from '../components/RegisterFeedUsageForm';
 import FeedInventoryCard from '../components/FeedInventoryCard';
+import PageHeader from '../components/PageHeader';
 import { formatMoney, formatShortDate } from '../components/format';
 
 export default function Feed(): ReactElement {
@@ -173,31 +174,34 @@ export default function Feed(): ReactElement {
 
   return (
     <section className="space-y-4">
-      <header className="flex items-start justify-between gap-4">
-        <h1 className="text-2xl font-semibold text-foreground">Feed</h1>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => {
-              setUsageError(null);
-              setUsageOpen(true);
-            }}
-          >
-            Record usage
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => {
-              setCreateError(null);
-              setCreateOpen(true);
-            }}
-          >
-            Record purchase
-          </button>
-        </div>
-      </header>
+      <PageHeader
+        title="Feed"
+        subtitle="Purchases, usage, and current inventory on hand."
+        actions={
+          <>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                setUsageError(null);
+                setUsageOpen(true);
+              }}
+            >
+              Record usage
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => {
+                setCreateError(null);
+                setCreateOpen(true);
+              }}
+            >
+              Record purchase
+            </button>
+          </>
+        }
+      />
 
       <section className="space-y-3">
         <div className="flex items-baseline justify-between gap-3">

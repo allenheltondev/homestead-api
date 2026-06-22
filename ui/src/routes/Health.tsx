@@ -16,6 +16,7 @@ import type {
 import Modal from '../components/Modal';
 import RegisterHealthExpenseForm from '../components/RegisterHealthExpenseForm';
 import MortalityChart from '../components/MortalityChart';
+import PageHeader from '../components/PageHeader';
 import { formatMoney, formatShortDate } from '../components/format';
 
 export default function Health(): ReactElement {
@@ -115,24 +116,22 @@ export default function Health(): ReactElement {
 
   return (
     <section className="space-y-6">
-      <header className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold text-foreground">Health</h1>
-          <p className="text-muted-foreground">
-            Track vet and medication spend, and keep an eye on mortality.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => {
-            setCreateError(null);
-            setCreateOpen(true);
-          }}
-        >
-          Log expense
-        </button>
-      </header>
+      <PageHeader
+        title="Health"
+        subtitle="Track vet and medication spend, and keep an eye on mortality."
+        actions={
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => {
+              setCreateError(null);
+              setCreateOpen(true);
+            }}
+          >
+            Log expense
+          </button>
+        }
+      />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard

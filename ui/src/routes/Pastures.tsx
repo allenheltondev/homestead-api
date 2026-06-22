@@ -6,6 +6,7 @@ import { createPasture, listPastures } from '../api/pastures';
 import { getPastureOccupancy } from '../api/stats';
 import type { CreatePastureRequest, Pasture } from '../api/types';
 import Modal from '../components/Modal';
+import PageHeader from '../components/PageHeader';
 
 export default function Pastures(): ReactElement {
   const apiFetch = useApiFetch();
@@ -80,19 +81,22 @@ export default function Pastures(): ReactElement {
 
   return (
     <section className="space-y-4">
-      <header className="flex items-start justify-between gap-4">
-        <h1 className="text-2xl font-semibold text-foreground">Pastures</h1>
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => {
-            setCreateError(null);
-            setCreateOpen(true);
-          }}
-        >
-          Add pasture
-        </button>
-      </header>
+      <PageHeader
+        title="Pastures"
+        subtitle="Paddocks and their current occupancy."
+        actions={
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => {
+              setCreateError(null);
+              setCreateOpen(true);
+            }}
+          >
+            Add pasture
+          </button>
+        }
+      />
 
       {error && <p className="form-error">{error}</p>}
       {pastures === null && !error && <p className="text-muted-foreground">Loading...</p>}

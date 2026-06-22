@@ -23,6 +23,7 @@ import Modal from '../components/Modal';
 import RegisterHarvestForm from '../components/RegisterHarvestForm';
 import HarvestYieldChart from '../components/HarvestYieldChart';
 import StatusBadge from '../components/StatusBadge';
+import PageHeader from '../components/PageHeader';
 import { listingTone } from '../components/statusTone';
 import { formatMoney, formatShortDate } from '../components/format';
 
@@ -179,30 +180,28 @@ export default function Garden(): ReactElement {
 
   return (
     <section className="space-y-6">
-      <header className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold text-foreground">Garden</h1>
-          <p className="text-muted-foreground">
-            Log harvests to Good Roots per crop, track yield, and watch your cost per unit.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link to="/beds" className="btn-secondary w-auto">
-            Beds &amp; crops
-          </Link>
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={!crops || crops.length === 0}
-            onClick={() => {
-              setCreateError(null);
-              setCreateOpen(true);
-            }}
-          >
-            Log harvest
-          </button>
-        </div>
-      </header>
+      <PageHeader
+        title="Garden"
+        subtitle="Log harvests to Good Roots per crop, track yield, and watch your cost per unit."
+        actions={
+          <>
+            <Link to="/beds" className="btn-secondary w-auto">
+              Beds &amp; crops
+            </Link>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={!crops || crops.length === 0}
+              onClick={() => {
+                setCreateError(null);
+                setCreateOpen(true);
+              }}
+            >
+              Log harvest
+            </button>
+          </>
+        }
+      />
 
       {stats && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -556,12 +555,10 @@ function ShareSurplusForm({
 function ConnectGoodRoots(): ReactElement {
   return (
     <section className="space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold text-foreground">Garden</h1>
-        <p className="text-muted-foreground">
-          Log harvests to Good Roots per crop, track yield, and watch your cost per unit.
-        </p>
-      </header>
+      <PageHeader
+        title="Garden"
+        subtitle="Log harvests to Good Roots per crop, track yield, and watch your cost per unit."
+      />
       <div className="card card-body text-center py-16 space-y-4">
         <div className="text-4xl" aria-hidden>
           🌱
