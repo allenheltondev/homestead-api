@@ -3,7 +3,6 @@ import { feedInventory } from "./domain/stats.mjs";
 import { listCareTasksDue } from "./domain/careTask.mjs";
 import { listBreedingsDue } from "./domain/breeding.mjs";
 import { listIncubationBatches } from "./domain/incubation.mjs";
-import { listLinkedHarvestLogs, updateHarvestGrnFields } from "./domain/harvest.mjs";
 import { isGrnConfigured, listMyListings } from "./lib/grn.mjs";
 import { publishEvent } from "./services/events.mjs";
 import { logger } from "./services/logger.mjs";
@@ -160,54 +159,33 @@ export async function composeAlerts(now = new Date()) {
   };
 }
 
-// Best-effort GRN claim-status sync. Fetches the homestead's own GRN listings,
-// reconciles their status against the locally linked harvest logs, and when a
-// listing has newly become `claimed` (or `expired`) updates the local
-// grnStatus, emits a GrnListingClaimed event (for newly-claimed ones), and
-// returns human-readable alert lines. EVERYTHING here is wrapped so GRN being
+// Best-effort GRN claim-status sync. There is no local harvest/listing store
+// anymore -- harvests + listings live entirely in GRN -- so this simply fetches
+// the homestead's own claimed GRN listings (GET /my/listings?status=claimed),
+// emits a GrnListingClaimed event per claimed listing, and returns a
+// human-readable alert line for each. EVERYTHING here is wrapped so GRN being
 // down/unconfigured never breaks the alert run -- on any failure it returns [].
-export async function syncGrnClaimStatus(now = new Date()) {
+export async function syncGrnClaimStatus() {
   if (!isGrnConfigured()) return [];
 
   try {
-    // Look back ~12 months of linked harvests so recently-listed surplus is
-    // covered without an unbounded fan-out.
-    const lookbackStart = new Date(now);
-    lookbackStart.setUTCMonth(lookbackStart.getUTCMonth() - 12);
-    const linked = await listLinkedHarvestLogs({
-      fromTs: lookbackStart.toISOString(),
-      toTs: now.toISOString(),
-    });
-    if (linked.length === 0) return [];
-
-    const myListings = await listMyListings({ limit: 100 });
+    const myListings = await listMyListings({ status: "claimed", limit: 100 });
     const items = Array.isArray(myListings) ? myListings : myListings?.items;
-    if (!Array.isArray(items)) return [];
-
-    // listingId -> upstream status.
-    const statusById = {};
-    for (const l of items) {
-      if (l?.id) statusById[l.id] = l.status;
-    }
+    if (!Array.isArray(items) || items.length === 0) return [];
 
     const lines = [];
-    for (const harvest of linked) {
-      const upstreamStatus = statusById[harvest.grnListingId];
-      if (!upstreamStatus || upstreamStatus === harvest.grnStatus) continue;
+    for (const listing of items) {
+      if (!listing?.id || listing.status !== "claimed") continue;
 
-      // Reconcile the local status to the upstream one.
-      await updateHarvestGrnFields(harvest.id, { grnStatus: upstreamStatus });
-
-      if (upstreamStatus === "claimed") {
-        lines.push(`GRN listing claimed: ${harvest.cropName} (${harvest.quantity} ${harvest.unit})`);
-        await publishEvent("GrnListingClaimed", {
-          id: harvest.id,
-          grnListingId: harvest.grnListingId,
-          cropName: harvest.cropName,
-        });
-      } else if (upstreamStatus === "expired") {
-        lines.push(`GRN listing expired: ${harvest.cropName}`);
-      }
+      const label = listing.title
+        ?? listing.cropName
+        ?? listing.crop_name
+        ?? listing.id;
+      lines.push(`GRN listing claimed: ${label}`);
+      await publishEvent("GrnListingClaimed", {
+        grnListingId: listing.id,
+        title: listing.title ?? null,
+      });
     }
     return lines;
   } catch (err) {

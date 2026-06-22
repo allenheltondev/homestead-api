@@ -265,43 +265,38 @@ unchanged.
   homestead keeps **no** local beds/plantings/planting-calendar records. See
   `docs/GRN.md` for the `/grn/crops`, `/grn/catalog/crops*`, and `/grn/beds`
   endpoint set.
-- **Harvest logs** (the one garden record that stays local) partition by month
-  (`pk = HARVEST#<yyyy-mm>`, derived from `harvestedAt`); the sort key
-  `LOG#<ts>#<id>` (ts = `harvestedAt` ISO) keeps a month's logs chronological.
-  Fields: `cropName` (required, denormalized for display), optional `variety`,
-  `quantity`, `unit` (lb|oz|each|bunch), `harvestedAt`, optional
-  **`cropLibraryId`** (the GRN grower-crop id this harvest came from) and
-  optional **`grnBedId`** (the GRN garden-bed id), `surplus` (bool), plus GRN
-  listing linkage `grnListingId?` / `grnStatus?`. An id-addressable pointer
-  (`pk = HARVESTID#<id>`, `sk = POINTER`) holds the real pk/sk so
-  `GET/DELETE /harvest-logs/{id}` and the GRN publish endpoints resolve the row
-  scan-free. `POST/GET(?from=&to=)/GET{id}/DELETE /harvest-logs` (range fan-out
-  by month; id-pointer DELETE). Create publishes `HarvestLogged`. No Scans.
-- **Garden stats** (`GET /stats/garden?period=`) aggregate harvest logs for the
-  period into total pounds (lb/oz normalized; each/bunch counted separately) and
-  a `byCrop` rollup grouped by `cropName`, surfacing each crop's
-  `cropLibraryId` when its logs are linked to a GRN grower crop. (The local
-  planting/bed yield join is gone now that beds live in GRN.) No Scans.
-- **GRN two-way integration.** The garden pillar publishes surplus harvests to
-  the Good Roots Network and proxies its crop-library / catalog / garden-bed /
-  browse / claim / request endpoints. See `docs/GRN.md`.
-  `POST/DELETE /harvest-logs/{id}/publish` create/expire a GRN listing: publish
-  resolves the harvest's `cropLibraryId` -> GRN `GET /crops/{id}` ->
-  `canonical_id` (catalog cropId) + `variety_id` to populate the GRN
-  `UpsertListingRequest`
-  (`title`/`cropId`/`quantityTotal`/`unit`/`availableStart`/`availableEnd`/`status`);
-  a harvest with no `cropLibraryId` is rejected `422` ("link this harvest to a
-  crop before sharing"). `GET/POST/GET{id}/PUT{id}/DELETE{id} /grn/crops`,
+- **Harvests live in GRN.** There is **no** local harvest table anymore. GRN
+  records harvests **per crop**; the homestead reaches them through the
+  `GET/POST /grn/crops/{id}/harvests` pass-through (GRN `HarvestLogResponse` /
+  `RecordHarvestRequest`). No local DynamoDB rows are written for harvests.
+- **Garden stats** (`GET /stats/garden?period=`) source from GRN: list the
+  user's crops (`GET /crops`), fetch each crop's harvests
+  (`GET /crops/{id}/harvests`), sum each harvest's `amount` by crop and overall,
+  filtering by `harvestedOn` within the period. The response keeps its shape:
+  `{ period, totalLbs, byCrop: [{ cropName, cropLibraryId, lbs, count }] }`. The
+  GRN read is wrapped so `GrnNotConfigured` / `GrnUnauthorized` degrades to an
+  empty garden (`totalLbs: 0`, `byCrop: []`) rather than failing. No Scans.
+- **GRN integration.** The garden pillar sources crops, the catalog, garden
+  beds, and harvests from the Good Roots Network and publishes surplus as GRN
+  listings (crop-level). See `docs/GRN.md`. Pass-throughs:
+  `GET/POST/GET{id}/PUT{id}/DELETE{id} /grn/crops`,
+  `GET/POST /grn/crops/{id}/harvests`, `POST /grn/crops/{id}/publish-surplus`,
   `GET /grn/catalog/crops`, `GET /grn/catalog/crops/{cropId}/varieties`,
-  `GET/POST/GET{id}/PUT{id}/DELETE{id} /grn/beds`, `GET /grn/my-listings`,
-  `GET /grn/discover?lat=&lng=&radius=`, `GET /grn/requests`, `POST /grn/claims`,
-  `GET /grn/claims/{id}` proxy GRN. The daily `AlertsFunction` runs a
-  best-effort claim-status sync: it reconciles linked harvests' `grnStatus`
-  from `GET /my/listings`, adds an alert line, and emits `GrnListingClaimed`
-  for newly claimed listings (wrapped so GRN being down never breaks alerts).
+  `GET/POST/GET{id}/PUT{id}/DELETE{id} /grn/beds`,
+  `POST /grn/listings`, `PUT /grn/listings/{id}` (unpublish = `status=expired`),
+  `GET /grn/my-listings`, `GET /grn/discover?lat=&lng=&radius=`,
+  `GET /grn/requests`, `POST /grn/claims`, `GET /grn/claims/{id}`.
+  `publish-surplus` fetches the grower crop, uses its `canonical_id` as the
+  listing `cropId` (+ `variety_id` → `varietyId`), merges the caller body, and
+  POSTs `/listings`; a crop with no `canonical_id` is rejected `422`. The daily
+  `AlertsFunction` runs a best-effort claim-status sync: it reads
+  `GET /my/listings?status=claimed`, adds an alert line, and emits
+  `GrnListingClaimed` per claimed listing (wrapped so GRN being down never
+  breaks alerts).
 - **P&L produce tie-in.** `GET /stats/pnl` adds `outputs.produceValue` =
-  harvest pounds for the period x `ProducePricePerLb` (resolved from a
-  `producePricePerLb` query param, else `PRODUCE_PRICE_PER_LB`, else 0). It
-  defaults to 0 so prior P&L behavior is preserved until a price is set.
+  GRN-sourced harvest amount for the period x `ProducePricePerLb` (resolved from
+  a `producePricePerLb` query param, else `PRODUCE_PRICE_PER_LB`, else 0). It
+  defaults to 0 (and degrades to 0 when GRN is unconfigured) so prior P&L
+  behavior is preserved until a price is set.
 - `expiresAt` is reserved for TTL on any ephemeral records (e.g.
   idempotency entries); permanent records omit it.

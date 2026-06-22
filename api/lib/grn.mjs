@@ -170,12 +170,12 @@ export async function createListing(payload, { idempotencyKey, correlationId } =
   return grnRequest("POST", "/listings", { body: payload, idempotencyKey, correlationId });
 }
 
-// DELETE /listings/{id} — retire a listing. GRN has no explicit DELETE in the
-// listing path set; updateListing flips status. We model "unpublish" as a PUT
-// flipping status to expired (the closest contract operation).
-export async function expireListing(listingId, payload, { correlationId } = {}) {
+// PUT /listings/{id} — update a listing (UpsertListingRequest). Used by the
+// /grn/listings/{id} pass-through; "unpublish" is just a PUT with status=expired.
+export async function updateListing(listingId, payload, { idempotencyKey, correlationId } = {}) {
   return grnRequest("PUT", `/listings/${encodeURIComponent(listingId)}`, {
-    body: { ...payload, status: "expired" },
+    body: payload,
+    idempotencyKey,
     correlationId,
   });
 }
@@ -266,6 +266,29 @@ export async function deleteGrowerCrop(cropLibraryId, { correlationId } = {}) {
 // GET /catalog/crops/{cropId}/varieties — catalog varieties for a crop.
 export async function listCatalogVarieties(cropId, { correlationId } = {}) {
   return grnRequest("GET", `/catalog/crops/${encodeURIComponent(cropId)}/varieties`, { correlationId });
+}
+
+// --- Crop harvests pass-through (GRN /crops/{id}/harvests) ----------------
+// GRN records harvests per crop now (the homestead keeps no local harvest log).
+// listCropHarvests returns a HarvestLogResponse
+// {growerCropId, totalHarvested (string), harvestCount, harvests: HarvestItem[]};
+// recordCropHarvest takes a RecordHarvestRequest {amount* (>0), unit?,
+// harvestedOn? (YYYY-MM-DD), notes?} and returns a RecordHarvestResponse
+// {harvest, totalHarvested, harvestCount}.
+
+// GET /crops/{cropLibraryId}/harvests — the crop's private harvest log.
+export async function listCropHarvests(cropLibraryId, { correlationId } = {}) {
+  return grnRequest("GET", `/crops/${encodeURIComponent(cropLibraryId)}/harvests`, { correlationId });
+}
+
+// POST /crops/{cropLibraryId}/harvests — record a harvest for a crop. Forwards
+// a caller Idempotency-Key so a retried record is safe.
+export async function recordCropHarvest(cropLibraryId, payload, { idempotencyKey, correlationId } = {}) {
+  return grnRequest("POST", `/crops/${encodeURIComponent(cropLibraryId)}/harvests`, {
+    body: payload,
+    idempotencyKey,
+    correlationId,
+  });
 }
 
 // --- Garden bed pass-through (GRN /beds) ---------------------------------

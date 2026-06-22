@@ -157,9 +157,9 @@ Parameters:
       Base URL of the Good Roots Network (GRN) API the garden pillar integrates
       with (e.g. https://api.goodroots.example). Surfaced to the API + Alerts
       Lambdas as GRN_API_BASE_URL. Leave empty to disable the GRN integration:
-      the /grn/* proxy and harvest publish endpoints then return 503
-      (GrnNotConfigured) and the daily claim-status sync is skipped. See
-      docs/GRN.md.
+      the /grn/* proxy endpoints then return 503 (GrnNotConfigured), the
+      GRN-sourced garden stats / produce value degrade to empty, and the daily
+      claim-status sync is skipped. See docs/GRN.md.
   GrnApiTokenSsmPath:
     Type: String
     Default: "/homestead/grn/token"
@@ -175,9 +175,10 @@ Parameters:
     Description: |
       Default market price per pound of garden produce used by the produce
       output valuation in the P&L (GET /stats/pnl -> outputs.produceValue =
-      harvest lbs x this price). Surfaced as PRODUCE_PRICE_PER_LB; a per-request
-      producePricePerLb query param overrides it. Defaults to 0 so produceValue
-      is 0 and prior P&L behavior is preserved until a price is configured.
+      GRN-sourced harvest amount x this price). Surfaced as PRODUCE_PRICE_PER_LB;
+      a per-request producePricePerLb query param overrides it. Defaults to 0 so
+      produceValue is 0 (and degrades to 0 when GRN is unconfigured) and prior
+      P&L behavior is preserved until a price is configured.
 
 # Combined condition so partial-set (one param without the other) is a
 # no-op rather than a deploy error.
@@ -507,8 +508,9 @@ Resources:
           LOW_FEED_ALERT_DAYS: !Ref LowFeedAlertDays
           HOMESTEAD_LATITUDE: !Ref HomesteadLatitude
           HOMESTEAD_LONGITUDE: !Ref HomesteadLongitude
-          # GRN config: the daily claim-status sync calls GET /my/listings and
-          # reconciles local harvest records. Best-effort -- empty base URL
+          # GRN config: the daily claim-status sync calls
+          # GET /my/listings?status=claimed and emits GrnListingClaimed per
+          # claimed listing (no local store). Best-effort -- empty base URL
           # skips the sync. Uses default Lambda networking for egress.
           GRN_API_BASE_URL: !Ref GrnApiBaseUrl
           GRN_API_TOKEN_SSM_PATH: !Ref GrnApiTokenSsmPath
@@ -516,9 +518,9 @@ Resources:
         - AWSLambdaBasicExecutionRole
         - Version: 2012-10-17
           Statement:
-            # DynamoDB read + update on the table/indexes: read-only stats plus
-            # writing the reconciled grnStatus onto linked harvest logs during
-            # the GRN claim-status sync. No Scan anywhere.
+            # DynamoDB read + update on the table/indexes for the daily alert
+            # aggregations (feed inventory, care tasks, breedings, hatches). No
+            # Scan anywhere. The GRN claim-status sync keeps no local state.
             - Effect: Allow
               Action:
                 - dynamodb:GetItem

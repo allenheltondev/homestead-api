@@ -13,7 +13,6 @@ import { registerBreedingRoutes } from "./breeding.mjs";
 import { registerGrowoutRoutes } from "./growout.mjs";
 import { registerCareTaskRoutes } from "./careTask.mjs";
 import { registerSalesRoutes } from "./sales.mjs";
-import { registerHarvestRoutes } from "./harvest.mjs";
 import { registerGardenRoutes } from "./garden.mjs";
 import { registerGrnRoutes } from "./grn.mjs";
 import { registerGrnGardenRoutes } from "./grnGarden.mjs";
@@ -38,7 +37,6 @@ export function registerRoutes(app) {
   registerGrowoutRoutes(app);
   registerCareTaskRoutes(app);
   registerSalesRoutes(app);
-  registerHarvestRoutes(app);
   registerGardenRoutes(app);
   registerGrnRoutes(app);
   registerGrnGardenRoutes(app);

@@ -1,9 +1,15 @@
 import { emptyResponse, jsonResponse, parseBody } from "../services/http.mjs";
+import { UnprocessableEntityError } from "../services/errors.mjs";
 import {
   validateGrowerCropUpsert,
   validateGardenBedUpsert,
   validateListQuery,
 } from "../validation/grnGarden.mjs";
+import {
+  validateRecordHarvest,
+  validateListingUpsert,
+  buildSurplusListingPayload,
+} from "../validation/grn.mjs";
 import {
   listGrowerCrops,
   createGrowerCrop,
@@ -17,6 +23,10 @@ import {
   deleteGrowerBed,
   listCatalogCrops,
   listCatalogVarieties,
+  listCropHarvests,
+  recordCropHarvest,
+  createListing,
+  updateListing,
 } from "../lib/grn.mjs";
 
 // Good Roots Network (GRN) crop-library / catalog / garden-bed pass-through
@@ -66,6 +76,69 @@ export function registerGrnGardenRoutes(app) {
     const correlationId = event?.requestContext?.requestId;
     await deleteGrowerCrop(params.id, { correlationId });
     return emptyResponse(204);
+  });
+
+  // --- Crop harvests (GRN /crops/{id}/harvests) -------------------------
+  // GRN records harvests per crop. These are thin pass-throughs over the
+  // listCropHarvests / recordCropHarvest contract operations.
+
+  // GET /grn/crops/{id}/harvests -> GET /crops/{cropLibraryId}/harvests
+  // (returns a HarvestLogResponse).
+  app.get("/grn/crops/:id/harvests", async ({ event, params }) => {
+    const correlationId = event?.requestContext?.requestId;
+    const result = await listCropHarvests(params.id, { correlationId });
+    return jsonResponse(200, result);
+  });
+
+  // POST /grn/crops/{id}/harvests -> POST /crops/{cropLibraryId}/harvests
+  // (body: RecordHarvestRequest; returns a RecordHarvestResponse). Forwards a
+  // caller Idempotency-Key so a retried record is safe.
+  app.post("/grn/crops/:id/harvests", async ({ event, params }) => {
+    const payload = validateRecordHarvest(parseBody(event));
+    const correlationId = event?.requestContext?.requestId;
+    const idempotencyKey = headerValue(event, "idempotency-key");
+    const result = await recordCropHarvest(params.id, payload, { idempotencyKey, correlationId });
+    return jsonResponse(201, result);
+  });
+
+  // POST /grn/crops/{id}/publish-surplus — convenience: fetch the grower crop,
+  // resolve its catalog cropId (canonical_id) + variety (variety_id), merge the
+  // caller-supplied {amount, availableEnd, pickup..., varietyId?}, and POST a
+  // GRN /listings. 422 when the crop has no canonical_id (no catalog link yet).
+  app.post("/grn/crops/:id/publish-surplus", async ({ event, params }) => {
+    const correlationId = event?.requestContext?.requestId;
+    const growerCrop = await getGrowerCrop(params.id, { correlationId });
+    const cropId = growerCrop?.canonical_id ?? null;
+    if (!cropId) {
+      throw new UnprocessableEntityError(
+        "the crop has no catalog entry yet; pick a catalog crop before sharing surplus",
+      );
+    }
+    const payload = buildSurplusListingPayload(growerCrop, parseBody(event), { cropId });
+    const idempotencyKey = headerValue(event, "idempotency-key");
+    const listing = await createListing(payload, { idempotencyKey, correlationId });
+    return jsonResponse(201, listing);
+  });
+
+  // --- Listings (GRN /listings) -----------------------------------------
+  // POST /grn/listings -> POST /listings (UpsertListingRequest). Forwards a
+  // caller Idempotency-Key.
+  app.post("/grn/listings", async ({ event }) => {
+    const payload = validateListingUpsert(parseBody(event));
+    const correlationId = event?.requestContext?.requestId;
+    const idempotencyKey = headerValue(event, "idempotency-key");
+    const listing = await createListing(payload, { idempotencyKey, correlationId });
+    return jsonResponse(201, listing);
+  });
+
+  // PUT /grn/listings/{id} -> PUT /listings/{id} (UpsertListingRequest).
+  // Unpublishing is just a PUT with status=expired.
+  app.put("/grn/listings/:id", async ({ event, params }) => {
+    const payload = validateListingUpsert(parseBody(event));
+    const correlationId = event?.requestContext?.requestId;
+    const idempotencyKey = headerValue(event, "idempotency-key");
+    const listing = await updateListing(params.id, payload, { idempotencyKey, correlationId });
+    return jsonResponse(200, listing);
   });
 
   // --- Catalog (GRN /catalog/crops) -------------------------------------
