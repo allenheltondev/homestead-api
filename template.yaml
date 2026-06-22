@@ -222,13 +222,17 @@ Globals:
         POWERTOOLS_SERVICE_NAME: homestead
         LOG_LEVEL: info
         ENVIRONMENT: !Ref Environment
-        # Origin echoed back as Access-Control-Allow-Origin. Custom domain
-        # when configured, else the dashboard CloudFront hostname. Kept in
-        # sync with the API Gateway-level Cors block below.
+        # Origin echoed back as Access-Control-Allow-Origin. The dashboard is
+        # served same-origin with /api through the one CloudFront
+        # distribution, so this only matters for direct cross-origin callers:
+        # the custom domain when configured, else "*" (a literal -- the
+        # distribution can't be referenced here without a circular dependency,
+        # since the distribution now fronts the API). Kept in sync with the
+        # API Gateway-level Cors block below.
         CORS_ALLOWED_ORIGIN: !If
           - DeployCustomDomain
           - !Sub "https://farm.${BaseCustomDomain}"
-          - !Sub "https://${DashboardDistribution.DomainName}"
+          - "*"
 
 Resources:
   HomesteadTable:
@@ -318,7 +322,9 @@ Resources:
         AllowOrigin: !If
           - DeployCustomDomain
           - !Sub "'https://farm.${BaseCustomDomain}'"
-          - !Sub "'https://${DashboardDistribution.DomainName}'"
+          # Same-origin via CloudFront; "*" only affects direct cross-origin
+          # callers. Can't reference the distribution here (circular dep).
+          - "'*'"
         AllowHeaders: "'authorization,content-type,idempotency-key'"
         AllowMethods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
 
