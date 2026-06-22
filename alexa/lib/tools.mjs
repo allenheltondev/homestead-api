@@ -14,6 +14,8 @@
 //           before anything is mutated (see lib/agent.mjs + the confirm-gated
 //           Yes/No handlers in handlers/intents.mjs).
 
+import { resolveCropLibraryId } from "./api.mjs";
+
 // ---------------------------------------------------------------------------
 // Bedrock toolSpec definitions (name + description + inputSchema.json).
 // These are the `toolConfig.tools` array passed to ConverseCommand.
@@ -406,16 +408,17 @@ export const TOOL_SPECS = [
     toolSpec: {
       name: "log_harvest",
       description:
-        "Log a garden harvest. Provide the crop and the quantity harvested, and optionally the unit (pounds, ounces, pieces, bunches).",
+        "Log a harvest of one of the grower's Good Roots Network crops. Provide the crop name (it must already be one of their crops) and the amount harvested, and optionally the unit (pounds, ounces, pieces, bunches).",
       inputSchema: {
         json: {
           type: "object",
           properties: {
             crop: {
               type: "string",
-              description: "The crop harvested (e.g. tomatoes, squash, kale).",
+              description:
+                "The crop harvested by name (e.g. tomatoes, squash, kale). Must match one of the grower's Good Roots crops.",
             },
-            quantity: {
+            amount: {
               type: "number",
               description: "How much was harvested.",
             },
@@ -425,7 +428,7 @@ export const TOOL_SPECS = [
                 "Optional unit (pound, ounce, kilogram, piece, bunch, basket, bushel).",
             },
           },
-          required: ["crop", "quantity"],
+          required: ["crop", "amount"],
         },
       },
     },
@@ -434,15 +437,15 @@ export const TOOL_SPECS = [
     toolSpec: {
       name: "publish_surplus",
       description:
-        "Share a harvest's surplus to the Good Roots Network so other members can claim it. Provide which crop or harvest to share (a crop name or harvest id).",
+        "Share a crop's surplus to the Good Roots Network so other members can claim it. Provide the crop name to share (it must already be one of the grower's Good Roots crops).",
       inputSchema: {
         json: {
           type: "object",
           properties: {
-            harvestRef: {
+            crop: {
               type: "string",
               description:
-                "The crop name or harvest id to share (e.g. 'my extra tomatoes').",
+                "The crop to share by name (e.g. tomatoes). Must match one of the grower's Good Roots crops.",
             },
             quantity: {
               type: "number",
@@ -453,7 +456,7 @@ export const TOOL_SPECS = [
               description: "Optional unit for the surplus quantity.",
             },
           },
-          required: ["harvestRef"],
+          required: ["crop"],
         },
       },
     },
@@ -643,26 +646,44 @@ export const REGISTRY = {
   },
   log_harvest: {
     kind: "write",
-    run: (args, api) => api.recordHarvest(cleanHarvest(args)),
+    // Harvests record to the Good Roots Network per-crop, so resolve the spoken
+    // crop NAME to its cropLibraryId before posting the harvest body.
+    run: async (args, api) => {
+      const cropLibraryId = await resolveCropLibraryId(api, args?.crop);
+      if (!cropLibraryId) throw cropNotFoundError(args?.crop);
+      return api.recordHarvest({ cropLibraryId, ...cleanHarvest(args) });
+    },
     describe: (args) => {
       const crop = args?.crop ?? "produce";
-      const quantity = args?.quantity;
+      const amount = args?.amount;
       const unit = args?.unit ?? "pounds";
-      return quantity != null
-        ? `Log ${plural(quantity, unit)} of ${crop}`
+      return amount != null
+        ? `Log ${plural(amount, unit)} of ${crop}`
         : `Log a ${crop} harvest`;
     },
   },
   publish_surplus: {
     kind: "write",
-    // The agent supplies a crop/harvest reference; the harvestRef is passed
-    // as the publish target id and any quantity/unit ride along in the body.
-    run: (args, api) =>
-      api.publishSurplus(textOrUndefined(args?.harvestRef), cleanSurplus(args)),
+    // The agent supplies the crop NAME; resolve it to a cropLibraryId and
+    // publish the surplus there, with any quantity/unit riding along in the body.
+    run: async (args, api) => {
+      const cropLibraryId = await resolveCropLibraryId(api, args?.crop);
+      if (!cropLibraryId) throw cropNotFoundError(args?.crop);
+      return api.publishSurplus(cropLibraryId, cleanSurplus(args));
+    },
     describe: (args) =>
-      `Share your ${args?.harvestRef ?? "surplus"} with the Good Roots Network`,
+      `Share your ${args?.crop ?? "surplus"} with the Good Roots Network`,
   },
 };
+
+// Error thrown when a spoken crop isn't one of the grower's Good Roots crops.
+// The confirm-gated Yes handler maps it to a spoken apology rather than crashing.
+function cropNotFoundError(crop) {
+  const name = typeof crop === "string" && crop.trim() ? crop.trim() : "that crop";
+  return new Error(
+    `I couldn't find ${name} in your Good Roots crops — add it first.`,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Argument normalizers. The model returns free-form JSON; these keep only the
@@ -785,14 +806,15 @@ function cleanHealthExpense(args) {
   return fields;
 }
 
+// Builds the Good Roots harvest body ({ amount, unit }) from the model's args.
+// The crop itself is NOT in the body — the runner resolves the crop name to a
+// cropLibraryId and posts to that crop's harvests endpoint.
 function cleanHarvest(args) {
   const fields = {};
-  const crop = textOrUndefined(args?.crop);
-  const quantity = numberOrUndefined(args?.quantity);
+  const amount = numberOrUndefined(args?.amount);
   const unit = textOrUndefined(args?.unit);
-  if (crop) fields.crop = crop;
-  if (quantity != null) {
-    fields.quantity = quantity;
+  if (amount != null) {
+    fields.amount = amount;
     fields.unit = unit ?? "lb";
   }
   return fields;

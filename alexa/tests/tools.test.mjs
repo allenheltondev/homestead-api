@@ -63,45 +63,62 @@ describe("garden/GRN runners", () => {
     expect(api.getGrnRequests).toHaveBeenCalledTimes(1);
   });
 
-  test("log_harvest runner posts cleaned fields and describes naturally", async () => {
-    const api = { recordHarvest: jest.fn().mockResolvedValue({}) };
+  test("log_harvest runner resolves the crop and posts the GRN harvest body", async () => {
+    const api = {
+      listGrnCrops: jest
+        .fn()
+        .mockResolvedValue({ crops: [{ id: "c1", name: "Tomatoes" }] }),
+      recordHarvest: jest.fn().mockResolvedValue({}),
+    };
     await REGISTRY.log_harvest.run(
-      { crop: "tomatoes", quantity: 5, unit: "pound" },
+      { crop: "tomatoes", amount: 5, unit: "pound" },
       api,
     );
     expect(api.recordHarvest).toHaveBeenCalledWith({
-      crop: "tomatoes",
-      quantity: 5,
+      cropLibraryId: "c1",
+      amount: 5,
       unit: "pound",
     });
-    expect(REGISTRY.log_harvest.describe({ crop: "tomatoes", quantity: 5 })).toMatch(
+    expect(REGISTRY.log_harvest.describe({ crop: "tomatoes", amount: 5 })).toMatch(
       /tomatoes/,
     );
   });
 
-  test("publish_surplus runner targets the harvestRef and rides quantity along", async () => {
-    const api = { publishSurplus: jest.fn().mockResolvedValue({}) };
-    await REGISTRY.publish_surplus.run(
-      { harvestRef: "my extra tomatoes", quantity: 3 },
-      api,
-    );
-    expect(api.publishSurplus).toHaveBeenCalledWith("my extra tomatoes", {
+  test("log_harvest runner throws a helpful error when the crop isn't found", async () => {
+    const api = {
+      listGrnCrops: jest.fn().mockResolvedValue({ crops: [] }),
+      recordHarvest: jest.fn(),
+    };
+    await expect(
+      REGISTRY.log_harvest.run({ crop: "dragonfruit", amount: 1 }, api),
+    ).rejects.toThrow(/dragonfruit/);
+    expect(api.recordHarvest).not.toHaveBeenCalled();
+  });
+
+  test("publish_surplus runner resolves the crop and rides quantity along", async () => {
+    const api = {
+      listGrnCrops: jest
+        .fn()
+        .mockResolvedValue({ crops: [{ id: "c1", name: "Tomatoes" }] }),
+      publishSurplus: jest.fn().mockResolvedValue({}),
+    };
+    await REGISTRY.publish_surplus.run({ crop: "tomatoes", quantity: 3 }, api);
+    expect(api.publishSurplus).toHaveBeenCalledWith("c1", {
       quantity: 3,
     });
     expect(
-      REGISTRY.publish_surplus.describe({ harvestRef: "my extra tomatoes" }),
+      REGISTRY.publish_surplus.describe({ crop: "tomatoes" }),
     ).toMatch(/Good Roots Network/);
   });
 });
 
 describe("garden normalizers", () => {
-  test("cleanHarvest keeps valid fields and defaults the unit", () => {
-    expect(__testables.cleanHarvest({ crop: "kale", quantity: 2 })).toEqual({
-      crop: "kale",
-      quantity: 2,
+  test("cleanHarvest keeps the amount + unit and defaults the unit", () => {
+    expect(__testables.cleanHarvest({ amount: 2 })).toEqual({
+      amount: 2,
       unit: "lb",
     });
-    expect(__testables.cleanHarvest({ crop: "  ", quantity: "x" })).toEqual({});
+    expect(__testables.cleanHarvest({ amount: "x" })).toEqual({});
   });
 
   test("cleanSurplus drops empty quantity/unit", () => {

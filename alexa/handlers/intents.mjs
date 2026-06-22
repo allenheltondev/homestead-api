@@ -7,6 +7,7 @@ import {
   createApiClient,
   ApiError,
   MissingTokenError,
+  resolveCropLibraryId,
 } from "../lib/api.mjs";
 import {
   renderSummary,
@@ -639,6 +640,23 @@ export const GetPnlIntentHandler = {
 
 // --- Garden pillar + Good Roots Network (GRN) ----------------------------
 
+// Speaks the "I couldn't find <crop>" nudge when a spoken crop isn't one of the
+// grower's Good Roots Network crops, so the user knows to add it first rather
+// than hitting a crash.
+function cropNotFound(handlerInput, crop) {
+  const name = crop ? `${crop}` : "that crop";
+  return handlerInput.responseBuilder
+    .speak(
+      `I couldn't find ${name} in your Good Roots crops — add it first, then try again.`,
+    )
+    .getResponse();
+}
+
+// LogHarvestIntent — dialog-delegated write. Harvests record to the Good Roots
+// Network per-crop, so on COMPLETED we resolve the spoken crop NAME to its
+// cropLibraryId (by listing the grower's GRN crops, matched case-insensitively)
+// and POST the harvest there. An unmatched crop gets a helpful nudge instead of
+// an error.
 export const LogHarvestIntentHandler = {
   canHandle(handlerInput) {
     return isIntent(handlerInput, "LogHarvestIntent");
@@ -647,11 +665,14 @@ export const LogHarvestIntentHandler = {
     if (dialogIncomplete(handlerInput)) return delegate(handlerInput);
 
     const intent = handlerInput.requestEnvelope.request.intent;
-    const fields = buildHarvestFields(intent);
+    const { crop, ...harvest } = buildHarvestFields(intent);
     try {
       const api = createApiClient(handlerInput);
-      const result = await api.recordHarvest(fields);
-      const text = renderHarvestLogged(result ?? fields);
+      const cropLibraryId = await resolveCropLibraryId(api, crop);
+      if (!cropLibraryId) return cropNotFound(handlerInput, crop);
+
+      const result = await api.recordHarvest({ cropLibraryId, ...harvest });
+      const text = renderHarvestLogged(result ?? { crop, ...harvest });
       return addConfirmationScreen(handlerInput, "Harvest logged", text)
         .speak(text)
         .getResponse();
@@ -687,9 +708,11 @@ export const GetGardenStatsIntentHandler = {
   },
 };
 
-// ShareSurplusIntent — dialog/confirm-gated write. Publishes a harvest's
-// surplus to the Good Roots Network. The dialog elicits + confirms the crop;
-// on COMPLETED we publish using the crop as the harvest reference.
+// ShareSurplusIntent — dialog/confirm-gated write. Publishes a crop's surplus
+// to the Good Roots Network. The dialog elicits + confirms the crop; on
+// COMPLETED we resolve the spoken crop NAME to its cropLibraryId (same listing
+// match as LogHarvest) and publish there. An unmatched crop gets a helpful
+// nudge instead of an error.
 export const ShareSurplusIntentHandler = {
   canHandle(handlerInput) {
     return isIntent(handlerInput, "ShareSurplusIntent");
@@ -706,7 +729,10 @@ export const ShareSurplusIntentHandler = {
     }
     try {
       const api = createApiClient(handlerInput);
-      const result = await api.publishSurplus(crop, body);
+      const cropLibraryId = await resolveCropLibraryId(api, crop);
+      if (!cropLibraryId) return cropNotFound(handlerInput, crop);
+
+      const result = await api.publishSurplus(cropLibraryId, body);
       const text = renderSurplusPublished(result ?? { crop, ...body });
       return addConfirmationScreen(handlerInput, "Surplus shared", text)
         .speak(text)

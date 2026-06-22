@@ -346,23 +346,26 @@ function normalizeHarvestUnit(raw) {
   return HARVEST_UNIT_SYNONYMS[raw.trim().toLowerCase()];
 }
 
-// Builds the POST /harvest-logs body for the dialog-delegated LogHarvestIntent.
+// Builds the spoken harvest details for the dialog-delegated LogHarvestIntent.
 // Required slots (crop + quantity) are guaranteed by the dialog model on
-// COMPLETED; the unit defaults to pounds and the date is optional.
+// COMPLETED. Harvests now record to the Good Roots Network per-crop, so the
+// `crop` here is the spoken NAME the handler resolves to a cropLibraryId; the
+// remaining fields make up the GRN harvest body ({ amount, unit, harvestedOn }).
+// The unit defaults to pounds and the date is optional.
 export function buildHarvestFields(intent) {
   const crop = textSlot(intent, "crop");
-  const quantity = parseCount(slotValue(intent, "quantity"));
+  const amount = parseCount(slotValue(intent, "quantity"));
   const unit = normalizeHarvestUnit(slotValue(intent, "unit")) ?? "lb";
 
   const fields = {};
   if (crop) fields.crop = crop;
-  if (Number.isFinite(quantity)) {
-    fields.quantity = quantity;
+  if (Number.isFinite(amount)) {
+    fields.amount = amount;
     fields.unit = unit;
   }
 
   const date = slotValue(intent, "date");
-  if (isIsoDate(date)) fields.date = date.trim();
+  if (isIsoDate(date)) fields.harvestedOn = date.trim();
 
   return fields;
 }

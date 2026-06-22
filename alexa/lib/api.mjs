@@ -208,19 +208,35 @@ export function createApiClient(handlerInput) {
     getPnl: (query) => request(token, "GET", joinQuery("/stats/pnl", query)),
 
     // --- Garden pillar + Good Roots Network (GRN) ------------------------
-    // POST /harvest-logs — log a garden harvest (crop + quantity + unit,
-    // optional date). The server returns the created harvest log.
-    recordHarvest: (fields) => request(token, "POST", "/harvest-logs", fields),
+    // GET /grn/crops — the grower's Good Roots Network crops, each carrying an
+    // id (cropLibraryId) and a name. Harvests are recorded per-crop, so the
+    // skill lists these to resolve a spoken crop name to its id.
+    listGrnCrops: () => request(token, "GET", "/grn/crops"),
+    // POST /grn/crops/{cropLibraryId}/harvests — record a harvest against one
+    // of the grower's GRN crops. Body: { amount, unit?, harvestedOn?, notes? }.
+    recordHarvest: ({ cropLibraryId, amount, unit, harvestedOn, notes } = {}) => {
+      const body = {};
+      if (amount != null) body.amount = amount;
+      if (unit != null) body.unit = unit;
+      if (harvestedOn != null) body.harvestedOn = harvestedOn;
+      if (notes != null) body.notes = notes;
+      return request(
+        token,
+        "POST",
+        `/grn/crops/${encodeURIComponent(cropLibraryId)}/harvests`,
+        body,
+      );
+    },
     // GET /stats/garden — garden harvest stats for an optional period.
     getGardenStats: (query) =>
       request(token, "GET", joinQuery("/stats/garden", query)),
-    // POST /harvest-logs/{id}/publish — share surplus from a harvest log to
-    // the Good Roots Network as a listing other members can claim.
-    publishSurplus: (id, fields) =>
+    // POST /grn/crops/{cropLibraryId}/publish-surplus — share surplus of a GRN
+    // crop as a listing other members can claim.
+    publishSurplus: (cropLibraryId, fields) =>
       request(
         token,
         "POST",
-        `/harvest-logs/${encodeURIComponent(id)}/publish`,
+        `/grn/crops/${encodeURIComponent(cropLibraryId)}/publish-surplus`,
         fields,
       ),
     // GET /grn/my-listings — the member's surplus listings on the Good Roots
@@ -230,6 +246,29 @@ export function createApiClient(handlerInput) {
     // Network that the member could fill.
     getGrnRequests: () => request(token, "GET", "/grn/requests"),
   };
+}
+
+// Normalizes the GET /grn/crops payload into a plain array of crops. The
+// endpoint may return a bare array or an object wrapping it under `crops`.
+export function grnCropList(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (payload && Array.isArray(payload.crops)) return payload.crops;
+  return [];
+}
+
+// Resolves a spoken crop NAME to its GRN cropLibraryId by listing the grower's
+// crops and matching case-insensitively (exact, trimmed). Returns the crop's id
+// (its `id`, falling back to `cropLibraryId`) or undefined when no crop matches.
+// Shared by the LogHarvest / ShareSurplus handlers and the agent tool runners
+// so both resolve crops the same way.
+export async function resolveCropLibraryId(api, cropName) {
+  const wanted = typeof cropName === "string" ? cropName.trim().toLowerCase() : "";
+  if (!wanted) return undefined;
+  const crops = grnCropList(await api.listGrnCrops());
+  const match = crops.find(
+    (c) => typeof c?.name === "string" && c.name.trim().toLowerCase() === wanted,
+  );
+  return match ? (match.id ?? match.cropLibraryId) : undefined;
 }
 
 // Appends a query string to a path from the keys we support ({ period, flock }),

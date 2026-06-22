@@ -75,6 +75,7 @@ jest.unstable_mockModule("../lib/api.mjs", () => ({
   createApiClient: () => apiClient,
   ApiError,
   MissingTokenError,
+  resolveCropLibraryId: jest.fn(),
   tokenFromRequest: () => "tok",
 }));
 

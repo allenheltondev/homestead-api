@@ -24,11 +24,16 @@ const getCareDue = jest.fn();
 const completeCareTask = jest.fn();
 const getUpcomingDue = jest.fn();
 const getPnl = jest.fn();
+const listGrnCrops = jest.fn();
 const recordHarvest = jest.fn();
 const getGardenStats = jest.fn();
 const publishSurplus = jest.fn();
 const getGrnListings = jest.fn();
 const getGrnRequests = jest.fn();
+// Resolves a spoken crop name to a cropLibraryId. Mocked so the harvest/surplus
+// intent tests can drive the matched / not-found branches independently of the
+// real listGrnCrops lookup.
+const resolveCropLibraryId = jest.fn();
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -67,6 +72,7 @@ jest.unstable_mockModule("../lib/api.mjs", () => ({
     completeCareTask,
     getUpcomingDue,
     getPnl,
+    listGrnCrops,
     recordHarvest,
     getGardenStats,
     publishSurplus,
@@ -75,6 +81,7 @@ jest.unstable_mockModule("../lib/api.mjs", () => ({
   }),
   ApiError,
   MissingTokenError,
+  resolveCropLibraryId,
   tokenFromRequest: () => "tok",
 }));
 
@@ -893,10 +900,11 @@ describe("LogHarvestIntent (dialog-delegated write)", () => {
     expect(recordHarvest).not.toHaveBeenCalled();
   });
 
-  test("posts crop + quantity when COMPLETED and confirms", async () => {
+  test("resolves the crop and records to the GRN per-crop when COMPLETED", async () => {
+    resolveCropLibraryId.mockResolvedValue("c1");
     recordHarvest.mockResolvedValue({
       crop: "tomatoes",
-      quantity: 5,
+      amount: 5,
       unit: "lb",
     });
     const res = await LogHarvestIntentHandler.handle(
@@ -908,9 +916,13 @@ describe("LogHarvestIntent (dialog-delegated write)", () => {
         { apl: true },
       ),
     );
+    expect(resolveCropLibraryId).toHaveBeenCalledWith(
+      expect.anything(),
+      "tomatoes",
+    );
     expect(recordHarvest).toHaveBeenCalledWith({
-      crop: "tomatoes",
-      quantity: 5,
+      cropLibraryId: "c1",
+      amount: 5,
       unit: "lb",
     });
     expect(res.delegated).toBe(false);
@@ -918,7 +930,23 @@ describe("LogHarvestIntent (dialog-delegated write)", () => {
     expect(res.directives).toHaveLength(1);
   });
 
+  test("nudges to add the crop first when it isn't a GRN crop", async () => {
+    resolveCropLibraryId.mockResolvedValue(undefined);
+    const res = await LogHarvestIntentHandler.handle(
+      handlerInput(
+        intentRequest("LogHarvestIntent", {
+          crop: { value: "dragonfruit" },
+          quantity: { value: "2" },
+        }),
+      ),
+    );
+    expect(recordHarvest).not.toHaveBeenCalled();
+    expect(res.speech).toContain("dragonfruit");
+    expect(res.speech).toContain("Good Roots");
+  });
+
   test("surfaces auth errors on COMPLETED", async () => {
+    resolveCropLibraryId.mockResolvedValue("c1");
     recordHarvest.mockRejectedValue(new MissingTokenError());
     const res = await LogHarvestIntentHandler.handle(
       handlerInput(
@@ -966,7 +994,8 @@ describe("ShareSurplusIntent (dialog/confirm-gated write)", () => {
     expect(publishSurplus).not.toHaveBeenCalled();
   });
 
-  test("publishes the surplus when COMPLETED and confirms", async () => {
+  test("resolves the crop and publishes the surplus when COMPLETED", async () => {
+    resolveCropLibraryId.mockResolvedValue("c1");
     publishSurplus.mockResolvedValue({
       crop: "tomatoes",
       quantity: 3,
@@ -981,13 +1010,29 @@ describe("ShareSurplusIntent (dialog/confirm-gated write)", () => {
         { apl: true },
       ),
     );
-    expect(publishSurplus).toHaveBeenCalledWith("tomatoes", { quantity: 3 });
+    expect(resolveCropLibraryId).toHaveBeenCalledWith(
+      expect.anything(),
+      "tomatoes",
+    );
+    expect(publishSurplus).toHaveBeenCalledWith("c1", { quantity: 3 });
     expect(res.delegated).toBe(false);
     expect(res.speech).toContain("Good Roots Network");
     expect(res.directives).toHaveLength(1);
   });
 
+  test("nudges to add the crop first when it isn't a GRN crop", async () => {
+    resolveCropLibraryId.mockResolvedValue(undefined);
+    const res = await ShareSurplusIntentHandler.handle(
+      handlerInput(
+        intentRequest("ShareSurplusIntent", { crop: { value: "dragonfruit" } }),
+      ),
+    );
+    expect(publishSurplus).not.toHaveBeenCalled();
+    expect(res.speech).toContain("dragonfruit");
+  });
+
   test("surfaces auth errors on COMPLETED", async () => {
+    resolveCropLibraryId.mockResolvedValue("c1");
     publishSurplus.mockRejectedValue(new MissingTokenError());
     const res = await ShareSurplusIntentHandler.handle(
       handlerInput(

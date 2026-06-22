@@ -384,3 +384,27 @@ region carries the inference profile the `BedrockModelId` resolves through
 (e.g. `us.amazon.nova-pro-v1:0` requires a US region such as `us-east-1`); if
 your Lambda runs elsewhere, set `BedrockModelId` to the matching `eu.*` /
 `apac.*` profile (or a region-local model id) and enable access there.
+
+## Garden harvests record to the Good Roots Network (per-crop)
+
+Harvest logging and surplus sharing go through the Good Roots Network (GRN)
+per-crop rather than a standalone harvest-log resource. The old
+`/harvest-logs*` and `/harvest-logs/{id}/publish` endpoints are gone.
+
+- **List crops:** `lib/api.mjs` `listGrnCrops()` → `GET /grn/crops`. Each crop
+  carries an `id` (the `cropLibraryId`) and a `name`.
+- **Record a harvest:** `recordHarvest({ cropLibraryId, amount, unit?, harvestedOn?, notes? })`
+  → `POST /grn/crops/{cropLibraryId}/harvests`. The body only carries the
+  harvest fields; the crop is in the path.
+- **Publish surplus:** `publishSurplus(cropLibraryId, fields)` →
+  `POST /grn/crops/{cropLibraryId}/publish-surplus`.
+- **Stats unchanged:** `getGardenStats()` still hits `GET /stats/garden`.
+
+Because the API is keyed by `cropLibraryId`, the skill resolves the spoken crop
+NAME to an id before writing. `resolveCropLibraryId(api, cropName)` (exported
+from `lib/api.mjs`) lists the grower's GRN crops and matches the name
+case-insensitively (trimmed, exact). `LogHarvestIntentHandler`,
+`ShareSurplusIntentHandler`, and the agent's `log_harvest` / `publish_surplus`
+tool runners all resolve through it. When no crop matches, the skill speaks a
+helpful nudge ("I couldn't find <crop> in your Good Roots crops — add it
+first") instead of erroring, so growers know to add the crop in GRN first.
