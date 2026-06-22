@@ -2,19 +2,35 @@ import type { ReactElement, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApiFetch } from '../auth/useApiFetch';
-import { getDigest, getEggCost, getFeedStats, getStatsSummary } from '../api/stats';
-import type { DigestStats, EggCostStats, FeedStats, StatsSummary } from '../api/types';
+import {
+  getCareDue,
+  getDigest,
+  getEggCost,
+  getFeedStats,
+  getPnl,
+  getStatsSummary,
+} from '../api/stats';
+import type {
+  CareDueStats,
+  DigestStats,
+  EggCostStats,
+  FeedStats,
+  PnlStats,
+  StatsSummary,
+} from '../api/types';
 import HerdChart from '../components/HerdChart';
 import FeedSpendChart from '../components/FeedSpendChart';
 import EggCostCard from '../components/EggCostCard';
 import DigestCard from '../components/DigestCard';
-import { formatMoney } from '../components/format';
+import { formatMoney, formatShortDate } from '../components/format';
 
 interface DashboardData {
   summary: StatsSummary;
   feed: FeedStats | null;
   eggCost: EggCostStats | null;
   digest: DigestStats | null;
+  pnl: PnlStats | null;
+  careDue: CareDueStats | null;
 }
 
 export default function Home(): ReactElement {
@@ -35,10 +51,14 @@ export default function Home(): ReactElement {
       getEggCost(apiFetch).catch(() => null),
       // Best-effort: the "this week" digest card.
       getDigest(apiFetch).catch(() => null),
+      // Best-effort: homestead P&L summary card.
+      getPnl(apiFetch).catch(() => null),
+      // Best-effort: care tasks due now or soon.
+      getCareDue(apiFetch).catch(() => null),
     ])
-      .then(([summary, feed, eggCost, digest]) => {
+      .then(([summary, feed, eggCost, digest, pnl, careDue]) => {
         if (cancelled) return;
-        setData({ summary, feed, eggCost, digest });
+        setData({ summary, feed, eggCost, digest, pnl, careDue });
       })
       .catch((err: Error) => {
         if (!cancelled) setError(err.message);
@@ -67,7 +87,7 @@ export default function Home(): ReactElement {
     );
   }
 
-  const { summary, feed, eggCost, digest } = data;
+  const { summary, feed, eggCost, digest, pnl, careDue } = data;
   const noData = summary.herd.totalAnimals === 0 && summary.pastures.total === 0;
 
   if (noData) {
@@ -200,6 +220,61 @@ export default function Home(): ReactElement {
           )}
         </section>
       </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <PanelCard
+          title="Profit & loss"
+          action={
+            <Link to="/pnl" className="btn-link">
+              View P&amp;L
+            </Link>
+          }
+        >
+          {pnl ? (
+            <PnlSummaryCard pnl={pnl} />
+          ) : (
+            <p className="text-sm text-muted-foreground py-2">
+              Add sales and log costs to see your homestead net.
+            </p>
+          )}
+        </PanelCard>
+
+        <PanelCard
+          title="Care due soon"
+          action={
+            <Link to="/care" className="btn-link">
+              All tasks
+            </Link>
+          }
+        >
+          {!careDue || careDue.tasks.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-2">Nothing due right now.</p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {careDue.tasks.slice(0, 5).map((t) => (
+                <li
+                  key={t.id}
+                  className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-3"
+                >
+                  <span className="text-sm font-medium text-foreground truncate">{t.title}</span>
+                  <span
+                    className={`text-xs shrink-0 ${
+                      t.overdue ? 'text-error-700' : 'text-warning-700'
+                    }`}
+                  >
+                    {t.overdue
+                      ? `${Math.abs(t.daysUntilDue)}d overdue`
+                      : t.daysUntilDue === 0
+                        ? 'Due today'
+                        : `in ${t.daysUntilDue}d`}{' '}
+                    · {formatShortDate(t.dueDate)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </PanelCard>
+      </div>
     </section>
   );
 }
@@ -264,6 +339,36 @@ function PanelCard({
         {action}
       </div>
       <div className="card-body">{children}</div>
+    </div>
+  );
+}
+
+function PnlSummaryCard({ pnl }: { pnl: PnlStats }): ReactElement {
+  const profitable = pnl.net >= 0;
+  return (
+    <div className="space-y-3">
+      <div>
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Net {pnl.period ? `· ${pnl.period}` : ''}
+        </span>
+        <span
+          className={`block text-3xl font-semibold mt-1 ${
+            profitable ? 'text-success-700' : 'text-warning-700'
+          }`}
+        >
+          {formatMoney(pnl.net)}
+        </span>
+      </div>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm border-t border-border pt-3">
+        <div>
+          <dt className="text-muted-foreground">Revenue</dt>
+          <dd className="font-medium text-success-700">{formatMoney(pnl.totalRevenue)}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Costs</dt>
+          <dd className="font-medium text-warning-700">{formatMoney(pnl.totalCosts)}</dd>
+        </div>
+      </dl>
     </div>
   );
 }

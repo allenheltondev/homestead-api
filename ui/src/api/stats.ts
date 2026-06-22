@@ -1,17 +1,24 @@
 import type { ApiFetch } from '../auth/useApiFetch';
 import type {
+  CareDueStats,
   DigestStats,
   EggCostByFlockRow,
   EggCostStats,
   EggStats,
   FeedInventoryStats,
   FeedStats,
+  GrowoutStats,
   HealthStats,
   HerdStats,
+  IncubationStats,
   LifecycleStats,
+  MilkCostStats,
+  MilkStats,
   MortalityStats,
   PastureOccupancyStats,
+  PnlStats,
   StatsSummary,
+  UpcomingBreedingStats,
 } from './types';
 
 export async function getHerdStats(apiFetch: ApiFetch): Promise<HerdStats> {
@@ -107,4 +114,47 @@ export async function getEggCostByFlock(
   return apiFetch<EggCostByFlockRow[]>('/stats/egg-cost/by-flock', {
     query: { period },
   });
+}
+
+// GET /stats/milk?period= — milk production totals plus a per-day series.
+export async function getMilkStats(
+  apiFetch: ApiFetch,
+  period?: string,
+): Promise<MilkStats> {
+  return apiFetch<MilkStats>('/stats/milk', { query: { period } });
+}
+
+// GET /stats/milk-cost?period= — cost-per-gallon from dairy feed spend.
+export async function getMilkCost(
+  apiFetch: ApiFetch,
+  period?: string,
+): Promise<MilkCostStats> {
+  return apiFetch<MilkCostStats>('/stats/milk-cost', { query: { period } });
+}
+
+// GET /stats/incubation — active batches, eggs incubating, and hatch rate.
+export async function getIncubation(apiFetch: ApiFetch): Promise<IncubationStats> {
+  return apiFetch<IncubationStats>('/stats/incubation');
+}
+
+// GET /stats/breeding/upcoming — breedings/kiddings with an upcoming due date.
+export async function getBreedingUpcoming(
+  apiFetch: ApiFetch,
+): Promise<UpcomingBreedingStats> {
+  return apiFetch<UpcomingBreedingStats>('/stats/breeding/upcoming');
+}
+
+// GET /stats/growout — active grow-out batches and processed-this-year totals.
+export async function getGrowout(apiFetch: ApiFetch): Promise<GrowoutStats> {
+  return apiFetch<GrowoutStats>('/stats/growout');
+}
+
+// GET /stats/care/due — care tasks due now or soon, with overdue counts.
+export async function getCareDue(apiFetch: ApiFetch): Promise<CareDueStats> {
+  return apiFetch<CareDueStats>('/stats/care/due');
+}
+
+// GET /stats/pnl?period= — homestead costs vs. outputs with a net result.
+export async function getPnl(apiFetch: ApiFetch, period?: string): Promise<PnlStats> {
+  return apiFetch<PnlStats>('/stats/pnl', { query: { period } });
 }

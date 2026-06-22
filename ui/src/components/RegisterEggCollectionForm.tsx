@@ -14,6 +14,7 @@ interface FormState {
   count: string;
   date: string;
   coop: string;
+  birdType: string;
   flock: string;
 }
 
@@ -21,6 +22,7 @@ const EMPTY: FormState = {
   count: '',
   date: '',
   coop: '',
+  birdType: '',
   flock: '',
 };
 
@@ -53,6 +55,8 @@ export default function RegisterEggCollectionForm({
     if (form.date) payload.date = form.date;
     const coop = form.coop.trim();
     if (coop.length > 0) payload.coop = coop;
+    const birdType = form.birdType.trim();
+    if (birdType.length > 0) payload.birdType = birdType;
     const flock = form.flock.trim();
     if (flock.length > 0) payload.flock = flock;
 
@@ -87,6 +91,21 @@ export default function RegisterEggCollectionForm({
           />
         </label>
       </div>
+
+      <label className="block">
+        <span className="field-label">Bird type</span>
+        <input
+          type="text"
+          className="input"
+          value={form.birdType}
+          onChange={(e) => update('birdType', e.target.value)}
+          placeholder="Optional — e.g. chicken, duck, quail"
+          disabled={busy}
+        />
+        <span className="field-hint mt-1 block">
+          Splits production out by bird type in the eggs view.
+        </span>
+      </label>
 
       <label className="block">
         <span className="field-label">Flock</span>

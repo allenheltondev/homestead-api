@@ -240,6 +240,8 @@ export interface EggCollection {
   count: number;
   date: string;
   coop: string | null;
+  // Optional bird type (e.g. chicken, duck, quail) the eggs came from.
+  birdType: string | null;
   createdAt: string;
 }
 
@@ -251,6 +253,8 @@ export interface CreateEggCollectionRequest {
   count: number;
   date?: string;
   coop?: string;
+  // Optional bird type (e.g. chicken, duck, quail) the eggs came from.
+  birdType?: string;
   // Optional flock attribution, used by per-flock egg-cost analytics.
   flock?: string;
 }
@@ -258,6 +262,7 @@ export interface CreateEggCollectionRequest {
 export interface EggCollectionFilters {
   from?: string;
   to?: string;
+  birdType?: string;
 }
 
 // --- Stats --------------------------------------------------------------
@@ -313,6 +318,8 @@ export interface EggStats {
   dozens: number;
   days: number;
   perDay: number;
+  // Per-bird-type production breakdown, present when collections are tagged.
+  byBirdType?: EggsByBirdTypeRow[];
 }
 
 // GET /stats/egg-cost?period=&storePricePerDozen= — cost-per-dozen analytics
@@ -492,4 +499,302 @@ export interface EggCostByFlockRow {
   costPerDozen: number;
   // Refined consumption-basis cost-per-dozen, present when usage is logged.
   consumptionBasis?: number;
+}
+
+// GET /stats/eggs?period= now includes an optional by-bird-type breakdown.
+export interface EggsByBirdTypeRow {
+  birdType: string;
+  eggs: number;
+  dozens: number;
+}
+
+// --- Milk ---------------------------------------------------------------
+
+// A logged milking. gallons is the yield; animalRef ties it to a milker.
+export interface MilkLog {
+  id: string;
+  animalRef: string | null;
+  gallons: number;
+  date: string;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface MilkLogListResponse {
+  milk_logs: MilkLog[];
+}
+
+// POST /milk-logs — record a milking. gallons is required; animalRef, note,
+// and date are optional (date defaults server-side to today).
+export interface CreateMilkLogRequest {
+  gallons: number;
+  animalRef?: string;
+  note?: string;
+  date?: string;
+}
+
+export interface MilkLogFilters {
+  from?: string;
+  to?: string;
+}
+
+// GET /stats/milk?period= — milk production totals + a per-day series.
+export interface MilkDayPoint {
+  date: string;
+  gallons: number;
+}
+
+export interface MilkStats {
+  period: string;
+  totalGallons: number;
+  days: number;
+  perDay: number;
+  byDay: MilkDayPoint[];
+}
+
+// GET /stats/milk-cost?period= — cost-per-gallon from dairy feed spend.
+export interface MilkCostStats {
+  period: string;
+  gallons: number;
+  feedSpend: number;
+  costPerGallon: number;
+  storePricePerGallon: number;
+  savingsPerGallon: number;
+  cheaperThanStore: boolean;
+}
+
+// --- Incubation & breeding ---------------------------------------------
+
+export type IncubationStatus = 'incubating' | 'hatched' | 'cancelled';
+
+// An incubation batch. expectedHatchDate is computed server-side from the set
+// date and species incubation period when not supplied.
+export interface IncubationBatch {
+  id: string;
+  birdType: string;
+  eggsSet: number;
+  setDate: string;
+  expectedHatchDate: string | null;
+  hatchedCount: number | null;
+  hatchedDate: string | null;
+  status: IncubationStatus;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface IncubationBatchListResponse {
+  incubation_batches: IncubationBatch[];
+}
+
+export interface CreateIncubationBatchRequest {
+  birdType: string;
+  eggsSet: number;
+  setDate?: string;
+  expectedHatchDate?: string;
+  note?: string;
+}
+
+// PATCH /incubation-batches/{id} — record a hatch or update status.
+export interface UpdateIncubationBatchRequest {
+  hatchedCount?: number;
+  hatchedDate?: string;
+  status?: IncubationStatus;
+  note?: string;
+}
+
+export interface IncubationStats {
+  active: number;
+  eggsIncubating: number;
+  hatchedThisYear: number;
+  // Average ratio (0..1) of chicks hatched to eggs set across closed batches.
+  hatchRate: number;
+}
+
+// A breeding/kidding record with an expected due date.
+export interface Breeding {
+  id: string;
+  species: string;
+  damRef: string | null;
+  sireRef: string | null;
+  bredDate: string;
+  expectedDueDate: string | null;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface BreedingListResponse {
+  breedings: Breeding[];
+}
+
+export interface CreateBreedingRequest {
+  species: string;
+  damRef?: string;
+  sireRef?: string;
+  bredDate?: string;
+  expectedDueDate?: string;
+  note?: string;
+}
+
+// GET /stats/breeding/upcoming — breedings with an upcoming due date.
+export interface UpcomingBreedingRow {
+  id: string;
+  species: string;
+  damRef: string | null;
+  expectedDueDate: string;
+  daysUntilDue: number;
+}
+
+export interface UpcomingBreedingStats {
+  upcoming: UpcomingBreedingRow[];
+}
+
+// --- Grow-out -----------------------------------------------------------
+
+export type GrowoutStatus = 'growing' | 'processed';
+
+// A grow-out batch (e.g. meat birds) tracked from start to processing.
+export interface GrowoutBatch {
+  id: string;
+  label: string;
+  species: string;
+  count: number;
+  startDate: string;
+  status: GrowoutStatus;
+  processedDate: string | null;
+  processedCount: number | null;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface GrowoutBatchListResponse {
+  growout_batches: GrowoutBatch[];
+}
+
+export interface CreateGrowoutBatchRequest {
+  label: string;
+  species: string;
+  count: number;
+  startDate?: string;
+  note?: string;
+}
+
+// PATCH /growout/{id} — record processing for a batch.
+export interface UpdateGrowoutBatchRequest {
+  status?: GrowoutStatus;
+  processedDate?: string;
+  processedCount?: number;
+  note?: string;
+}
+
+export interface GrowoutStats {
+  activeBatches: number;
+  birdsGrowing: number;
+  processedThisYear: number;
+}
+
+// --- Care tasks ---------------------------------------------------------
+
+export type CareTaskStatus = 'open' | 'done';
+export type CareTaskCadence = 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+
+// A scheduled care task (vaccination, hoof trim, coop clean, etc.).
+export interface CareTask {
+  id: string;
+  title: string;
+  category: string | null;
+  animalRef: string | null;
+  cadence: CareTaskCadence;
+  dueDate: string;
+  status: CareTaskStatus;
+  lastCompletedDate: string | null;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface CareTaskListResponse {
+  care_tasks: CareTask[];
+}
+
+export interface CreateCareTaskRequest {
+  title: string;
+  category?: string;
+  animalRef?: string;
+  cadence?: CareTaskCadence;
+  dueDate?: string;
+  note?: string;
+}
+
+export interface UpdateCareTaskRequest {
+  title?: string;
+  category?: string;
+  animalRef?: string;
+  cadence?: CareTaskCadence;
+  dueDate?: string;
+  status?: CareTaskStatus;
+  note?: string;
+}
+
+export interface CareTaskFilters {
+  status?: CareTaskStatus;
+}
+
+// GET /stats/care/due — tasks due now or soon.
+export interface CareDueRow {
+  id: string;
+  title: string;
+  category: string | null;
+  dueDate: string;
+  daysUntilDue: number;
+  overdue: boolean;
+}
+
+export interface CareDueStats {
+  dueCount: number;
+  overdueCount: number;
+  tasks: CareDueRow[];
+}
+
+// --- Sales & P&L --------------------------------------------------------
+
+// A revenue line (eggs, meat, milk, livestock, etc.).
+export interface Sale {
+  id: string;
+  category: string;
+  amount: number;
+  buyer: string | null;
+  date: string;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface SaleListResponse {
+  sales: Sale[];
+}
+
+export interface CreateSaleRequest {
+  category: string;
+  amount: number;
+  buyer?: string;
+  date?: string;
+  note?: string;
+}
+
+export interface SaleFilters {
+  from?: string;
+  to?: string;
+}
+
+// GET /stats/pnl?period= — costs vs. outputs with a net result.
+export interface PnlLineRow {
+  label: string;
+  amount: number;
+}
+
+export interface PnlStats {
+  period: string;
+  totalCosts: number;
+  totalRevenue: number;
+  net: number;
+  costs: PnlLineRow[];
+  revenue: PnlLineRow[];
 }
