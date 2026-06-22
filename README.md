@@ -81,6 +81,8 @@ api/
   index.mjs          Lambda entry (wraps the Powertools Router)
   app.mjs            Router + notFound + errorHandler
   authorizer.mjs     Cognito id-token Lambda authorizer
+  copilot.mjs        Read-only farm copilot (POST /copilot) — Bedrock Nova Pro
+  copilot/tools.mjs  Read-only tool registry the copilot loop drives
   routes/            HTTP route handlers (index.mjs aggregates them)
   domain/            Data access + business rules
   validation/        Request validation / response formatting

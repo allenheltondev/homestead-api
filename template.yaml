@@ -560,6 +560,65 @@ Resources:
           Properties:
             Schedule: !Ref AlertSchedule
 
+  # Read-only farm copilot (POST /copilot). Shares the api/ CodeUri but has its
+  # own esbuild entry point (copilot.mjs) so it ships the Bedrock client without
+  # pulling in the full route bundle. It answers free-form questions across all
+  # homestead data by driving an Amazon Nova Pro model through the Bedrock
+  # Converse tool-use protocol over the in-process read-only domain/stats
+  # aggregations. The explicit POST /copilot route wins over the ApiFunction
+  # proxy. Needs DynamoDB read on the table/indexes and bedrock:InvokeModel
+  # (same Nova Pro ARNs the AlexaSkillFunction uses).
+  CopilotFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        <<: *esbuild-properties
+        EntryPoints:
+          - copilot.mjs
+    Properties:
+      CodeUri: api
+      Handler: copilot.handler
+      Timeout: 29
+      MemorySize: 512
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref HomesteadTable
+          # Bedrock model id (or cross-region inference profile) the copilot's
+          # Converse tool-use loop invokes.
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: 2012-10-17
+          Statement:
+            # DynamoDB read on the table + its indexes (read-only stats). No
+            # Scan anywhere.
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:BatchGetItem
+              Resource:
+                - !GetAtt HomesteadTable.Arn
+                - !Sub "${HomesteadTable.Arn}/index/*"
+            # The copilot invokes Amazon Nova Pro via the Bedrock Converse API.
+            # Scoped to the Nova Pro foundation model plus the cross-region
+            # inference profile (us.* / eu.* / apac.*) the model id resolves to.
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/amazon.nova-pro-v1:0"
+                - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*amazon.nova-pro-v1:0"
+      Events:
+        Copilot:
+          Type: Api
+          Properties:
+            RestApiId: !Ref HomesteadApi
+            Path: /copilot
+            Method: post
+
   # Alexa skill backend. Its own CodeUri (alexa/) and esbuild entry point so
   # it ships ask-sdk-core without pulling in the API route/domain bundle. The
   # AlexaSkill event makes Alexa the only invoker; when an AlexaSkillId is
