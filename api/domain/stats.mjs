@@ -338,7 +338,7 @@ export async function feedStats(months) {
 // We Query each month in the period and sum the counts. `days` is the count
 // of distinct collection days; `perDay` is the average eggs per collection
 // day (0 when there were none). No Scans.
-export async function eggStats(months, { flock } = {}) {
+export async function eggStats(months, { flock, birdType } = {}) {
   const batches = await Promise.all(
     months.map((month) =>
       queryAll({
@@ -354,12 +354,20 @@ export async function eggStats(months, { flock } = {}) {
 
   let totalEggs = 0;
   const collectionDays = new Set();
+  // Per-bird-type breakdown (eggs + dozens). Legacy rows (no birdType) count
+  // as chicken so the breakdown is always complete.
+  const byBirdTypeMap = {};
 
   for (const collection of batches.flat()) {
     // Per-flock attribution restricts the tally to one coop (the flock key);
     // the default (no flock) counts every collection, unchanged.
     if (flock !== undefined && collection.coop !== flock) continue;
-    totalEggs += Number(collection.count) || 0;
+    const rowBirdType = collection.birdType ?? "chicken";
+    // Optional bird-type filter restricts the tally; the default counts all.
+    if (birdType !== undefined && rowBirdType !== birdType) continue;
+    const count = Number(collection.count) || 0;
+    totalEggs += count;
+    byBirdTypeMap[rowBirdType] = (byBirdTypeMap[rowBirdType] ?? 0) + count;
     const collectedAt = collection.collectedAt;
     if (typeof collectedAt === "string") {
       collectionDays.add(collectedAt.slice(0, 10));
@@ -370,13 +378,21 @@ export async function eggStats(months, { flock } = {}) {
   const dozens = totalEggs / 12;
   const perDay = days > 0 ? totalEggs / days : 0;
 
-  return { totalEggs, dozens, days, perDay };
+  const byBirdType = Object.entries(byBirdTypeMap)
+    .map(([type, eggs]) => ({ birdType: type, eggs, dozens: eggs / 12 }))
+    .sort((a, b) => a.birdType.localeCompare(b.birdType));
+
+  return { totalEggs, dozens, days, perDay, byBirdType };
 }
 
-// Builds the GET /stats/eggs payload for a period.
-export async function eggStatsForPeriod(period, months) {
-  const { totalEggs, dozens, days, perDay } = await eggStats(months);
-  return { period, totalEggs, dozens, days, perDay };
+// Builds the GET /stats/eggs payload for a period. An optional birdType filter
+// restricts the totals to one bird type; the byBirdType breakdown is always
+// included. With no birdType the top-level figures are unchanged.
+export async function eggStatsForPeriod(period, months, { birdType } = {}) {
+  const { totalEggs, dozens, days, perDay, byBirdType } = await eggStats(months, { birdType });
+  const out = { period, totalEggs, dozens, days, perDay, byBirdType };
+  if (birdType !== undefined) out.birdType = birdType;
+  return out;
 }
 
 // --- Egg cost per dozen -------------------------------------------------
@@ -397,9 +413,9 @@ export async function eggStatsForPeriod(period, months) {
 //
 // Both leave cost figures null when there are no qualifying dozens so callers
 // never divide by zero. The store comparison uses the resolved store price.
-export async function eggCostStats(period, months, { storePricePerDozen, flock } = {}) {
+export async function eggCostStats(period, months, { storePricePerDozen, flock, birdType } = {}) {
   const [{ totalEggs, dozens }, poultryFeedSpend, consumptionBasis] = await Promise.all([
-    eggStats(months, { flock }),
+    eggStats(months, { flock, birdType }),
     poultryFeedSpendForMonths(months, { flock }),
     poultryConsumptionBasis(months, storePricePerDozen, { flock }),
   ]);
@@ -435,6 +451,8 @@ export async function eggCostStats(period, months, { storePricePerDozen, flock }
   // Only surface the flock dimension when one was requested so the default
   // payload shape is byte-for-byte unchanged.
   if (flock !== undefined) out.flock = flock;
+  // Likewise surface birdType only when filtering by it.
+  if (birdType !== undefined) out.birdType = birdType;
   return out;
 }
 
@@ -955,4 +973,346 @@ async function eggsThisWeek(now = new Date()) {
     }
   }
   return total;
+}
+
+// --- Output price resolvers (P&L + milk/meat valuations) ---------------
+// Resolve the milk price per gallon: explicit override wins, else the
+// MILK_PRICE_PER_GALLON env var, else 8.0 (a typical raw-goat-milk figure).
+const DEFAULT_MILK_PRICE_PER_GALLON = 8.0;
+export function resolveMilkPricePerGallon(override) {
+  if (override !== undefined && override !== null) return override;
+  const fromEnv = parseFloat(process.env.MILK_PRICE_PER_GALLON);
+  return Number.isFinite(fromEnv) ? fromEnv : DEFAULT_MILK_PRICE_PER_GALLON;
+}
+
+// Resolve the meat price per pound: explicit override wins, else the
+// MEAT_PRICE_PER_LB env var, else 6.0.
+const DEFAULT_MEAT_PRICE_PER_LB = 6.0;
+export function resolveMeatPricePerLb(override) {
+  if (override !== undefined && override !== null) return override;
+  const fromEnv = parseFloat(process.env.MEAT_PRICE_PER_LB);
+  return Number.isFinite(fromEnv) ? fromEnv : DEFAULT_MEAT_PRICE_PER_LB;
+}
+
+// --- Milk by period -----------------------------------------------------
+// Milk logs partition by month on the base table (pk = MILK#<yyyy-mm>). We
+// Query each month in the period and sum volume normalized to gallons. No
+// Scans.
+
+// Conversion factors to gallons (US). Unknown units are treated as gallons.
+const GALLONS_PER = {
+  gallon: 1,
+  quart: 0.25,
+  liter: 0.264172,
+  ml: 0.000264172,
+};
+
+function toGallons(volume, unit) {
+  const factor = GALLONS_PER[unit] ?? 1;
+  return (Number(volume) || 0) * factor;
+}
+
+// Queries every MILK#<yyyy-mm> partition in the months list (no Scan) and
+// returns the flat list of log rows.
+async function milkLogsForMonths(months) {
+  const batches = await Promise.all(
+    months.map((month) =>
+      queryAll({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": `MILK#${month}`,
+          ":sk": "LOG#",
+        },
+      }),
+    ),
+  );
+  return batches.flat();
+}
+
+// Total milk volume (normalized to gallons) for the period, plus per-animal
+// and per-day breakdowns. perDay is the average gallons per logging day.
+export async function milkStats(period, months) {
+  const logs = await milkLogsForMonths(months);
+
+  let totalGallons = 0;
+  const perAnimalMap = {};
+  const perDayMap = {};
+
+  for (const log of logs) {
+    const gallons = toGallons(log.volume, log.unit);
+    totalGallons += gallons;
+
+    const animalId = log.animalId ?? "unattributed";
+    perAnimalMap[animalId] = (perAnimalMap[animalId] ?? 0) + gallons;
+
+    if (typeof log.loggedAt === "string") {
+      const day = log.loggedAt.slice(0, 10);
+      perDayMap[day] = (perDayMap[day] ?? 0) + gallons;
+    }
+  }
+
+  const perAnimal = Object.entries(perAnimalMap)
+    .map(([animalId, gallons]) => ({ animalId, gallons }))
+    .sort((a, b) => b.gallons - a.gallons || a.animalId.localeCompare(b.animalId));
+
+  const perDay = Object.entries(perDayMap)
+    .map(([date, gallons]) => ({ date, gallons }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const loggingDays = perDay.length;
+  const avgGallonsPerDay = loggingDays > 0 ? totalGallons / loggingDays : 0;
+
+  return {
+    period,
+    totalGallons,
+    unit: "gallon",
+    loggingDays,
+    avgGallonsPerDay,
+    perAnimal,
+    perDay,
+  };
+}
+
+// --- Milk cost per gallon ----------------------------------------------
+// Mirrors eggCostStats: divides goat-type feed spend over the period by total
+// gallons produced -> cost per gallon. Feed counts as goat-type when its
+// feedType/type is one of the goat aliases. Cost figures are null when there
+// are no gallons. No Scans.
+const GOAT_FEED_TYPES = new Set(["goat", "dairy", "dairy goat", "doe", "ruminant"]);
+
+function isGoatFeedType(value) {
+  if (typeof value !== "string") return false;
+  return GOAT_FEED_TYPES.has(value.trim().toLowerCase());
+}
+
+async function goatFeedSpendForMonths(months) {
+  const purchases = await feedPurchasesForMonths(months);
+  let spend = 0;
+  for (const purchase of purchases) {
+    if (isGoatFeedType(purchase.feedType ?? purchase.type)) {
+      spend += Number(purchase.cost) || 0;
+    }
+  }
+  return spend;
+}
+
+export async function milkCostStats(period, months, { milkPricePerGallon } = {}) {
+  const [{ totalGallons }, goatFeedSpend] = await Promise.all([
+    milkStats(period, months),
+    goatFeedSpendForMonths(months),
+  ]);
+
+  const marketPrice = resolveMilkPricePerGallon(milkPricePerGallon);
+
+  let costPerGallon = null;
+  let savingsPerGallon = null;
+  let cheaperThanStore = null;
+  if (totalGallons > 0) {
+    costPerGallon = goatFeedSpend / totalGallons;
+    savingsPerGallon = marketPrice - costPerGallon;
+    cheaperThanStore = costPerGallon < marketPrice;
+  }
+
+  return {
+    period,
+    gallons: totalGallons,
+    goatFeedSpend,
+    costPerGallon,
+    marketPricePerGallon: marketPrice,
+    savingsPerGallon,
+    cheaperThanStore,
+  };
+}
+
+// --- Incubation analytics ----------------------------------------------
+// Lists every batch from the INCUBATION collection partition (GSI1) and tallies
+// active batches plus an overall hatch rate (sum hatchedCount / sum eggs set
+// among batches that have reported a hatch). No Scans.
+export async function incubationStats() {
+  const batches = await queryAll({
+    TableName: TABLE_NAME,
+    IndexName: "GSI1",
+    KeyConditionExpression: "gsi1pk = :pk",
+    ExpressionAttributeValues: { ":pk": "INCUBATION" },
+  });
+
+  let activeBatches = 0;
+  let eggsSetWithOutcome = 0;
+  let totalHatched = 0;
+  const active = [];
+
+  for (const b of batches) {
+    if (b.status === "incubating") {
+      activeBatches += 1;
+      active.push({
+        id: b.id,
+        species: b.species,
+        count: b.count,
+        setAt: b.setAt,
+        expectedHatchAt: b.expectedHatchAt,
+      });
+      continue;
+    }
+    // Completed batches (hatched/partial/failed) contribute to the hatch rate.
+    if (b.hatchedCount !== undefined && b.hatchedCount !== null) {
+      eggsSetWithOutcome += Number(b.count) || 0;
+      totalHatched += Number(b.hatchedCount) || 0;
+    }
+  }
+
+  const hatchRate = eggsSetWithOutcome > 0 ? totalHatched / eggsSetWithOutcome : null;
+
+  return {
+    activeBatches,
+    active,
+    eggsSetWithOutcome,
+    totalHatched,
+    hatchRate,
+  };
+}
+
+// --- Grow-out analytics -------------------------------------------------
+// Lists every batch from the GROWOUT collection partition (GSI1) and tallies
+// active (raising) batches and processed yield lbs. Optionally divides the
+// poultry feed spend over the period by yield lbs for a cost-to-raise figure.
+// No Scans.
+export async function growoutStats(months) {
+  const [batches, poultryFeedSpend] = await Promise.all([
+    queryAll({
+      TableName: TABLE_NAME,
+      IndexName: "GSI1",
+      KeyConditionExpression: "gsi1pk = :pk",
+      ExpressionAttributeValues: { ":pk": "GROWOUT" },
+    }),
+    months ? poultryFeedSpendForMonths(months) : Promise.resolve(null),
+  ]);
+
+  let activeBatches = 0;
+  let processedBatches = 0;
+  let dressedWeightLbsTotal = 0;
+  let processedCount = 0;
+  const active = [];
+
+  for (const b of batches) {
+    if (b.status === "processed") {
+      processedBatches += 1;
+      dressedWeightLbsTotal += Number(b.dressedWeightLbsTotal) || 0;
+      processedCount += Number(b.processedCount) || 0;
+    } else {
+      activeBatches += 1;
+      active.push({
+        id: b.id,
+        species: b.species,
+        count: b.count,
+        purpose: b.purpose,
+        startedAt: b.startedAt,
+      });
+    }
+  }
+
+  const out = {
+    activeBatches,
+    active,
+    processedBatches,
+    dressedWeightLbsTotal,
+    processedCount,
+  };
+
+  // Optional feed cost-to-raise: poultry feed spend over the period divided by
+  // dressed yield lbs. null when no period was supplied or there's no yield.
+  if (poultryFeedSpend !== null) {
+    out.feedSpend = poultryFeedSpend;
+    out.costToRaisePerLb = dressedWeightLbsTotal > 0
+      ? poultryFeedSpend / dressedWeightLbsTotal
+      : null;
+  }
+
+  return out;
+}
+
+// --- P&L ----------------------------------------------------------------
+// Composes costs (feed + health spend) and outputs (egg/milk/meat value +
+// actual sales) into a homestead profit & loss for the period.
+//   costs   = feed spend + health spend (reused from the existing aggregations)
+//   outputs = eggsValue (dozens * store egg price)
+//           + milkValue (gallons * milk price)
+//           + meatValue (grow-out dressed lbs * meat price)
+//           + salesRevenue (sum of actual sales in the period)
+//   net     = outputs - costs
+// All reads Query known month / collection partitions -- no Scans.
+export async function pnlStats(period, months, options = {}) {
+  const {
+    storePricePerDozen,
+    milkPricePerGallon,
+    meatPricePerLb,
+  } = options;
+
+  const [feed, health, eggs, milk, growout, salesRevenue] = await Promise.all([
+    feedStats(months),
+    healthStats(period, months),
+    eggStats(months),
+    milkStats(period, months),
+    growoutStats(),
+    salesRevenueForMonths(months),
+  ]);
+
+  const feedSpend = feed.totalCost;
+  const healthSpend = health.totalSpend;
+  const costs = feedSpend + healthSpend;
+
+  const eggPrice = resolveStorePricePerDozen(storePricePerDozen);
+  const milkPrice = resolveMilkPricePerGallon(milkPricePerGallon);
+  const meatPrice = resolveMeatPricePerLb(meatPricePerLb);
+
+  const eggsValue = eggs.dozens * eggPrice;
+  const milkValue = milk.totalGallons * milkPrice;
+  const meatValue = growout.dressedWeightLbsTotal * meatPrice;
+
+  const outputs = eggsValue + milkValue + meatValue + salesRevenue;
+  const net = outputs - costs;
+
+  return {
+    period,
+    costs: {
+      total: costs,
+      feedSpend,
+      healthSpend,
+    },
+    outputs: {
+      total: outputs,
+      eggsValue,
+      milkValue,
+      meatValue,
+      salesRevenue,
+    },
+    prices: {
+      storeEggPricePerDozen: eggPrice,
+      milkPricePerGallon: milkPrice,
+      meatPricePerLb: meatPrice,
+    },
+    net,
+  };
+}
+
+// Sums actual sales `amount` over the SALE#<yyyy-mm> partitions in the months
+// list (no Scan).
+async function salesRevenueForMonths(months) {
+  const batches = await Promise.all(
+    months.map((month) =>
+      queryAll({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": `SALE#${month}`,
+          ":sk": "SALE#",
+        },
+      }),
+    ),
+  );
+  let revenue = 0;
+  for (const sale of batches.flat()) {
+    revenue += Number(sale.amount) || 0;
+  }
+  return revenue;
 }

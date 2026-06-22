@@ -76,6 +76,15 @@ describe("validateEggCollectionCreate", () => {
   test("rejects a malformed date", () => {
     expect(() => validateEggCollectionCreate({ count: 1, date: "nope" })).toThrow(/date/i);
   });
+
+  test("defaults birdType to chicken and accepts a valid override", () => {
+    expect(validateEggCollectionCreate({ count: 1 }).birdType).toBe("chicken");
+    expect(validateEggCollectionCreate({ count: 1, birdType: "Duck" }).birdType).toBe("duck");
+  });
+
+  test("rejects an unknown birdType", () => {
+    expect(() => validateEggCollectionCreate({ count: 1, birdType: "emu" })).toThrow(/birdType/i);
+  });
 });
 
 describe("validateEggCollectionQuery", () => {

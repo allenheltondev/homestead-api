@@ -42,6 +42,9 @@ export function buildEggCollectionItem(fields) {
     count: fields.count,
     collectedAt: ts,
     coop: fields.coop,
+    // Bird type the collection is attributed to (default chicken). Always set
+    // for new rows; legacy rows are read as chicken by the formatter + stats.
+    birdType: fields.birdType,
     createdAt,
   };
 }
