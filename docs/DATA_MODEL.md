@@ -38,6 +38,18 @@ UTC strings so string ordering on a sort key matches chronological order.
 | Egg collection -> id pointer | `EGGID#<id>`   | `POINTER`                  | —                            | —                                   | —        | —                                       |
 | Health expense          | `HEALTHEXP#<yyyy-mm>` | `EXP#<ts>#<id>`         | —                            | —                                   | —        | —                                       |
 | Health expense -> id pointer | `HEALTHEXPID#<id>` | `POINTER`             | —                            | —                                   | —        | —                                       |
+| Milk log                | `MILK#<yyyy-mm>`    | `LOG#<ts>#<id>`            | —                            | —                                   | —        | —                                       |
+| Milk log -> id pointer  | `MILKID#<id>`       | `POINTER`                  | —                            | —                                   | —        | —                                       |
+| Incubation batch        | `INCUBATION#<id>`   | `METADATA`                 | `INCUBATION`                 | `<setAt>`                           | —        | —                                       |
+| Breeding record         | `BREEDING#<id>`     | `METADATA`                 | `BREEDING`                   | `<expectedDueAt>`                   | —        | —                                       |
+| Grow-out batch          | `GROWOUT#<id>`      | `METADATA`                 | `GROWOUT`                    | `<startedAt>`                       | —        | —                                       |
+| Care task               | `CARETASK#<id>`     | `METADATA`                 | `CARETASK`                   | `<nextDueAt>`                       | —        | —                                       |
+| Sale                    | `SALE#<yyyy-mm>`    | `SALE#<ts>#<id>`           | —                            | —                                   | —        | —                                       |
+| Sale -> id pointer      | `SALEID#<id>`       | `POINTER`                  | —                            | —                                   | —        | —                                       |
+
+Egg collections also carry an optional `birdType` (one of
+chicken/duck/goose/turkey, default chicken) stored on the row; the keys are
+unchanged.
 
 ## Access pattern -> index map
 
@@ -63,6 +75,14 @@ UTC strings so string ordering on a sort key matches chronological order.
 | 18| List health expenses for a month                     | Query     | table | `pk = HEALTHEXP#<yyyy-mm>`, `begins_with(sk, "EXP#")` (or `sk BETWEEN` for a ts range; optional `category` `FilterExpression`) |
 | 19| Resolve a health expense's key from its id (for DELETE) | GetItem | table | `pk = HEALTHEXPID#<id>`, `sk = POINTER`                                |
 | 20| Deaths by cause in a month (mortality)               | Query     | GSI1  | `gsi1pk = EVENT#DEATH#<yyyy-mm>` (items pulled to read `cause`)            |
+| 21| List milk logs for a month                           | Query     | table | `pk = MILK#<yyyy-mm>`, `begins_with(sk, "LOG#")` (or `sk BETWEEN` for a ts range) |
+| 22| Resolve a milk log's key from its id (for DELETE)    | GetItem   | table | `pk = MILKID#<id>`, `sk = POINTER`                                         |
+| 23| List all incubation batches                          | Query     | GSI1  | `gsi1pk = INCUBATION` (ordered by `gsi1sk = <setAt>`)                      |
+| 24| List all breedings / breedings due within N days     | Query     | GSI1  | `gsi1pk = BREEDING` (range on `gsi1sk = <expectedDueAt>` for the due window) |
+| 25| List all grow-out batches                            | Query     | GSI1  | `gsi1pk = GROWOUT` (ordered by `gsi1sk = <startedAt>`)                     |
+| 26| List care tasks (ordered) / due within N days        | Query     | GSI1  | `gsi1pk = CARETASK` (range on `gsi1sk = <nextDueAt>`, `<=` upper bound for the due window) |
+| 27| List sales for a month                               | Query     | table | `pk = SALE#<yyyy-mm>`, `begins_with(sk, "SALE#")` (or `sk BETWEEN` for a ts range) |
+| 28| Resolve a sale's key from its id (for DELETE)        | GetItem   | table | `pk = SALEID#<id>`, `sk = POINTER`                                         |
 
 ## Notes
 
@@ -170,5 +190,74 @@ UTC strings so string ordering on a sort key matches chronological order.
   mortality, lines }` payload. The scheduled function always publishes a
   `HomesteadDigest` event and, when `DIGEST_SENDER` + `DIGEST_RECIPIENT` are
   configured, emails it via SES (failures never fail the schedule). No Scans.
+- **Milk logs** partition by month (`MILK#<yyyy-mm>`); the sort key
+  `LOG#<ts>#<id>` (ts = `loggedAt` ISO) keeps a month's logs chronological.
+  Fields: optional `animalId`, `volume` (> 0), `unit` (default `gallon`;
+  gallon/quart/liter/ml), `loggedAt` (ISO), `createdAt`. `POST /milk-logs`
+  accepts `{ animalId?, volume, unit?, date? }`; a range list (pattern 21) fans
+  out one `Query` per month partition; an id-pointer item (pattern 22) backs
+  scan-free DELETE. Create publishes a `MilkLogged` event. `GET /stats/milk`
+  sums volume normalized to gallons (per-animal + per-day breakdowns);
+  `GET /stats/milk-cost` divides goat-type feed spend by gallons -> cost per
+  gallon vs. a market price (mirrors egg-cost). No Scans.
+- **Eggs by bird type.** Egg collections accept an optional `birdType`
+  (chicken/duck/goose/turkey, default chicken) stored on the row; legacy rows
+  read as chicken. `GET /stats/eggs` and `/stats/egg-cost` accept an optional
+  `birdType` query that restricts the totals, and `/stats/eggs` always returns a
+  `byBirdType` breakdown. With no `birdType` the original top-level figures are
+  unchanged. No Scans.
+- **Incubation batches** are single metadata items
+  (`pk = INCUBATION#<id>`, `sk = METADATA`) listed via a collection-partition
+  GSI (`gsi1pk = INCUBATION`, `gsi1sk = <setAt>`, pattern 23). `expectedHatchAt`
+  is computed from species incubation days (chicken 21, turkey 28, goose 30,
+  duck 28, default 21). `POST/GET /incubation-batches`,
+  `PATCH /incubation-batches/{id}` (records `hatchedCount` + `status`), and
+  `DELETE`. Create publishes `EggsSet`; the hatch PATCH publishes `Hatched`.
+  `GET /stats/incubation` reports active batches + overall hatch rate. No Scans.
+- **Breeding records** are single metadata items
+  (`pk = BREEDING#<id>`, `sk = METADATA`) listed via a collection-partition GSI
+  keyed by `expectedDueAt` (`gsi1pk = BREEDING`, pattern 24). `expectedDueAt` is
+  computed from gestation days (goat 150, sheep 147, pig 114, default 150).
+  `POST/GET/DELETE /breedings`. `GET /stats/breeding/upcoming?withinDays=`
+  range-queries the GSI for breedings due within N days. No Scans.
+- **Grow-out batches** are single metadata items
+  (`pk = GROWOUT#<id>`, `sk = METADATA`) listed via a collection-partition GSI
+  keyed by `startedAt` (`gsi1pk = GROWOUT`, pattern 25). `POST/GET /growout`,
+  `PATCH /growout/{id}/process` (records `processedAt`, `dressedWeightLbsTotal`,
+  `processedCount`, flips status to `processed`), and `DELETE`.
+  `GET /stats/growout` reports active + processed dressed yield lbs and an
+  optional feed cost-to-raise when a `period` is supplied. No Scans.
+- **Care tasks** are single metadata items
+  (`pk = CARETASK#<id>`, `sk = METADATA`) listed via a collection-partition GSI
+  ordered by `nextDueAt` (`gsi1pk = CARETASK`, pattern 26). Fields: `title`,
+  `category`, optional `target`, `cadenceDays`, `lastDoneAt?`, `nextDueAt`.
+  `POST/GET/PATCH/DELETE /care-tasks`; `POST /care-tasks/{id}/complete` sets
+  `lastDoneAt = now` and advances `nextDueAt = now + cadenceDays` (rewriting
+  `gsi1sk` so the order stays consistent). `GET /stats/care/due?withinDays=`
+  (default 7) range-queries the GSI with a `<=` upper bound (includes overdue).
+  No Scans.
+- **Sales** partition by month (`SALE#<yyyy-mm>`); the sort key
+  `SALE#<ts>#<id>` (ts = `soldAt` ISO) keeps a month's sales chronological.
+  Fields: `item`, `amount` (>= 0), optional `quantity`, `soldAt`, `createdAt`.
+  `POST/GET(?from=&to=)/DELETE /sales` (range fan-out pattern 27; id-pointer
+  DELETE pattern 28). Create publishes a `SaleRecorded` event. No Scans.
+- **Homestead P&L** (`GET /stats/pnl`) composes costs (feed spend + health
+  spend, reusing the existing aggregations) and outputs (`eggsValue` = dozens ×
+  store egg price, `milkValue` = gallons × milk price, `meatValue` = grow-out
+  dressed lbs × meat price, `salesRevenue` = sum of actual sales) into a
+  `net = outputs − costs`. Prices resolve from query params, else the
+  `STORE_EGG_PRICE_PER_DOZEN` / `MILK_PRICE_PER_GALLON` / `MEAT_PRICE_PER_LB`
+  env vars, else defaults. No Scans (egg/milk/sale month partitions + the
+  grow-out collection partition only).
+- **Daily alerts** (the scheduled `AlertsFunction`) compose low-feed warnings
+  (feed-inventory `daysRemaining` < `LOW_FEED_ALERT_DAYS`), care tasks due
+  within 3 days, upcoming hatches + breedings (within 7 days), and — when
+  `HOMESTEAD_LATITUDE` / `HOMESTEAD_LONGITUDE` are set — a daily open-meteo
+  forecast yielding frost (< 2 °C) / heat (> 32 °C) flags. The function ALWAYS
+  publishes a `HomesteadAlert` event and, when `DIGEST_SENDER` +
+  `DIGEST_RECIPIENT` are configured, emails the alerts via SES (best effort —
+  a delivery failure never fails the run). The optional weather fetch needs
+  internet egress; the function runs on default Lambda networking (no VPC) so
+  it has outbound access. No Scans.
 - `expiresAt` is reserved for TTL on any ephemeral records (e.g.
   idempotency entries); permanent records omit it.

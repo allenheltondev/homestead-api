@@ -110,6 +110,46 @@ Parameters:
     Description: |
       Schedule expression for the weekly digest function. Defaults to Sundays
       at 18:00 UTC. Override to change cadence.
+  MilkPricePerGallon:
+    Type: String
+    Default: "8.00"
+    Description: |
+      Default market price per gallon of milk used by the milk cost-per-gallon
+      analytics (GET /stats/milk-cost) and the milk output valuation in the P&L
+      (GET /stats/pnl). Surfaced to the API Lambda as MILK_PRICE_PER_GALLON; a
+      per-request milkPricePerGallon query param overrides it.
+  MeatPricePerLb:
+    Type: String
+    Default: "6.00"
+    Description: |
+      Default market price per pound of dressed meat used by the meat output
+      valuation in the P&L (GET /stats/pnl). Surfaced to the API Lambda as
+      MEAT_PRICE_PER_LB; a per-request meatPricePerLb query param overrides it.
+  LowFeedAlertDays:
+    Type: String
+    Default: "7"
+    Description: |
+      Days-remaining threshold below which a feed type triggers a low-feed
+      alert in the scheduled AlertsFunction. Surfaced as LOW_FEED_ALERT_DAYS.
+  HomesteadLatitude:
+    Type: String
+    Default: ""
+    Description: |
+      Optional homestead latitude. When both HomesteadLatitude and
+      HomesteadLongitude are set the AlertsFunction fetches a daily open-meteo
+      forecast and adds frost (<2C) / heat (>32C) alerts. Leave empty to skip
+      the weather block entirely.
+  HomesteadLongitude:
+    Type: String
+    Default: ""
+    Description: |
+      Optional homestead longitude. See HomesteadLatitude.
+  AlertSchedule:
+    Type: String
+    Default: "cron(0 13 * * ? *)"
+    Description: |
+      Schedule expression for the daily homestead alerts function. Defaults to
+      13:00 UTC daily. Override to change cadence.
 
 # Combined condition so partial-set (one param without the other) is a
 # no-op rather than a deploy error.
@@ -268,6 +308,10 @@ Resources:
           # Default store egg price per dozen for the cost-per-dozen
           # analytics; a storePricePerDozen query param overrides it.
           STORE_EGG_PRICE_PER_DOZEN: !Ref StoreEggPricePerDozen
+          # Default output prices for the milk cost + P&L analytics; per-request
+          # query params override them.
+          MILK_PRICE_PER_GALLON: !Ref MilkPricePerGallon
+          MEAT_PRICE_PER_LB: !Ref MeatPricePerLb
       Policies:
         - AWSLambdaBasicExecutionRole
         - Version: 2012-10-17
@@ -384,6 +428,64 @@ Resources:
           Type: Schedule
           Properties:
             Schedule: !Ref DigestSchedule
+
+  # Scheduled daily homestead alerts. Shares the api/ CodeUri but has its own
+  # esbuild entry point (alerts.mjs) so it doesn't pull in the full route
+  # bundle. On its schedule it composes alerts (low feed, care tasks due,
+  # upcoming hatches + breedings, optional open-meteo frost/heat), always
+  # publishes a HomesteadAlert event, and (when DIGEST_SENDER + DIGEST_RECIPIENT
+  # are set) emails them via SES. The optional weather fetch needs internet
+  # egress; the function runs on default Lambda networking (no VPC) so it has
+  # outbound access. Needs DynamoDB read, events:PutEvents, and ses:SendEmail.
+  AlertsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        <<: *esbuild-properties
+        EntryPoints:
+          - alerts.mjs
+    Properties:
+      CodeUri: api
+      Handler: alerts.handler
+      Environment:
+        Variables:
+          DIGEST_SENDER: !Ref DigestSenderEmail
+          DIGEST_RECIPIENT: !Ref DigestRecipientEmail
+          LOW_FEED_ALERT_DAYS: !Ref LowFeedAlertDays
+          HOMESTEAD_LATITUDE: !Ref HomesteadLatitude
+          HOMESTEAD_LONGITUDE: !Ref HomesteadLongitude
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: 2012-10-17
+          Statement:
+            # DynamoDB read on the table + its indexes (read-only stats). No
+            # Scan anywhere.
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:BatchGetItem
+              Resource:
+                - !GetAtt HomesteadTable.Arn
+                - !Sub "${HomesteadTable.Arn}/index/*"
+            # EventBridge: publish the HomesteadAlert event to the default bus.
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource:
+                - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/default"
+            # SES: send the alert email when configured.
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: "*"
+      Events:
+        DailySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref AlertSchedule
 
   # Alexa skill backend. Its own CodeUri (alexa/) and esbuild entry point so
   # it ships ask-sdk-core without pulling in the API route/domain bundle. The

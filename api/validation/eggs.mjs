@@ -10,6 +10,21 @@ const ISO_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const YYYY_MM_RE = /^\d{4}-\d{2}$/;
 
+// Bird types eggs can be attributed to. Defaults to chicken so legacy
+// payloads (no birdType) behave exactly as before.
+export const BIRD_TYPES = new Set(["chicken", "duck", "goose", "turkey"]);
+export const DEFAULT_BIRD_TYPE = "chicken";
+
+// Normalizes an optional birdType. Returns the default (chicken) when absent
+// so existing behavior is identical when birdType is omitted.
+export function normalizeBirdType(value) {
+  if (value === undefined || value === null || value === "") return DEFAULT_BIRD_TYPE;
+  if (typeof value !== "string" || !BIRD_TYPES.has(value.trim().toLowerCase())) {
+    throw new BadRequestError(`birdType must be one of ${[...BIRD_TYPES].join(", ")}`);
+  }
+  return value.trim().toLowerCase();
+}
+
 // Validates the POST /egg-collections body. Returns a clean fields object
 // the domain layer turns into a row. `collectedAt` is an ISO timestamp so
 // the sort key + month bucket stay consistent.
@@ -18,11 +33,13 @@ export function validateEggCollectionCreate(body) {
     throw new BadRequestError("request body must be a JSON object");
   }
 
-  const { count, date, coop } = body;
+  const { count, date, coop, birdType } = body;
 
   if (typeof count !== "number" || !Number.isInteger(count) || count < 1) {
     throw new BadRequestError("count must be an integer >= 1");
   }
+
+  const normalizedBirdType = normalizeBirdType(birdType);
 
   let collectedAt;
   if (date === undefined || date === null || date === "") {
@@ -49,6 +66,7 @@ export function validateEggCollectionCreate(body) {
     count,
     collectedAt,
     coop: normalizedCoop,
+    birdType: normalizedBirdType,
   };
 }
 
@@ -67,6 +85,17 @@ export function validateEggCollectionQuery(query = {}) {
   }
 
   return { fromTs, toTs };
+}
+
+// Parses an optional ?birdType filter for the egg stats endpoints. Returns
+// undefined when absent (so the default, unfiltered behavior is preserved) and
+// a normalized value otherwise.
+export function parseBirdTypeFilter(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string" || !BIRD_TYPES.has(value.trim().toLowerCase())) {
+    throw new BadRequestError(`birdType must be one of ${[...BIRD_TYPES].join(", ")}`);
+  }
+  return value.trim().toLowerCase();
 }
 
 // Converts a `from`/`to` bound into an ISO timestamp. `inclusiveEnd` pushes a
@@ -114,6 +143,9 @@ export function formatEggCollection(row) {
     count: row.count,
     collectedAt: row.collectedAt,
     coop: row.coop ?? null,
+    // Stored rows default to chicken; legacy rows (no birdType) report chicken
+    // so the field is always present and the breakdown stays consistent.
+    birdType: row.birdType ?? DEFAULT_BIRD_TYPE,
     createdAt: row.createdAt,
   };
 }

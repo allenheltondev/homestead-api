@@ -14,7 +14,17 @@ import {
   healthStats,
   summaryStats,
   monthsForPeriod,
+  milkStats,
+  milkCostStats,
+  incubationStats,
+  growoutStats,
+  pnlStats,
 } from "../domain/stats.mjs";
+import { listBreedingsDue } from "../domain/breeding.mjs";
+import { listCareTasksDue } from "../domain/careTask.mjs";
+import { formatBreeding, parseWithinDays as parseBreedingWithinDays } from "../validation/breeding.mjs";
+import { formatCareTask, parseWithinDays as parseCareWithinDays } from "../validation/careTask.mjs";
+import { parseBirdTypeFilter } from "../validation/eggs.mjs";
 import { composeWeeklyDigest } from "../domain/digest.mjs";
 import { yyyymm } from "../services/time.mjs";
 
@@ -58,12 +68,15 @@ export function registerStatsRoutes(app) {
     return jsonResponse(200, await feedInventory());
   });
 
-  // GET /stats/eggs?period=YYYY-MM|YYYY -- total eggs, dozens, days, perDay.
+  // GET /stats/eggs?period=YYYY-MM|YYYY&birdType= -- total eggs, dozens, days,
+  // perDay, plus a byBirdType breakdown. An optional birdType restricts the
+  // totals to one bird type; omitting it keeps the original behavior.
   app.get("/stats/eggs", async ({ event }) => {
     const period = resolvePeriodString(event);
     const months = monthsForPeriod(period);
     if (!months) throw new BadRequestError("period must be YYYY-MM or YYYY");
-    return jsonResponse(200, await eggStatsForPeriod(period, months));
+    const birdType = parseBirdTypeFilter(event?.queryStringParameters?.birdType);
+    return jsonResponse(200, await eggStatsForPeriod(period, months, { birdType }));
   });
 
   // GET /stats/egg-cost/by-flock?period=&storePricePerDozen= -- per-flock
@@ -87,7 +100,11 @@ export function registerStatsRoutes(app) {
     if (!months) throw new BadRequestError("period must be YYYY-MM or YYYY");
     const storePricePerDozen = parseStorePrice(event);
     const flock = parseFlock(event);
-    return jsonResponse(200, await eggCostStats(period, months, { storePricePerDozen, flock }));
+    const birdType = parseBirdTypeFilter(event?.queryStringParameters?.birdType);
+    return jsonResponse(
+      200,
+      await eggCostStats(period, months, { storePricePerDozen, flock, birdType }),
+    );
   });
 
   // GET /stats/mortality?period=YYYY-MM|YYYY -- total deaths, deaths by cause,
@@ -106,6 +123,77 @@ export function registerStatsRoutes(app) {
     const months = monthsForPeriod(period);
     if (!months) throw new BadRequestError("period must be YYYY-MM or YYYY");
     return jsonResponse(200, await healthStats(period, months));
+  });
+
+  // GET /stats/milk?period=YYYY-MM|YYYY -- total gallons, per-animal, per-day.
+  app.get("/stats/milk", async ({ event }) => {
+    const period = resolvePeriodString(event);
+    const months = monthsForPeriod(period);
+    if (!months) throw new BadRequestError("period must be YYYY-MM or YYYY");
+    return jsonResponse(200, await milkStats(period, months));
+  });
+
+  // GET /stats/milk-cost?period=&milkPricePerGallon= -- goat-feed cost per
+  // gallon vs. a market price (mirrors /stats/egg-cost).
+  app.get("/stats/milk-cost", async ({ event }) => {
+    const period = resolvePeriodString(event);
+    const months = monthsForPeriod(period);
+    if (!months) throw new BadRequestError("period must be YYYY-MM or YYYY");
+    const milkPricePerGallon = parsePrice(event, "milkPricePerGallon");
+    return jsonResponse(200, await milkCostStats(period, months, { milkPricePerGallon }));
+  });
+
+  // GET /stats/incubation -- active batches + overall hatch rate.
+  app.get("/stats/incubation", async () => {
+    return jsonResponse(200, await incubationStats());
+  });
+
+  // GET /stats/growout?period=YYYY-MM|YYYY -- active + processed yield lbs,
+  // plus an optional feed cost-to-raise when a period is supplied.
+  app.get("/stats/growout", async ({ event }) => {
+    const periodRaw = event?.queryStringParameters?.period;
+    let months;
+    if (periodRaw !== undefined && periodRaw !== null && periodRaw !== "") {
+      months = monthsForPeriod(periodRaw);
+      if (!months) throw new BadRequestError("period must be YYYY-MM or YYYY");
+    }
+    return jsonResponse(200, await growoutStats(months));
+  });
+
+  // GET /stats/breeding/upcoming?withinDays= -- breedings due within N days.
+  app.get("/stats/breeding/upcoming", async ({ event }) => {
+    const withinDays = parseBreedingWithinDays(event?.queryStringParameters?.withinDays);
+    const items = await listBreedingsDue(withinDays);
+    return jsonResponse(200, {
+      withinDays,
+      breedings: items.map(formatBreeding),
+    });
+  });
+
+  // GET /stats/care/due?withinDays= -- care tasks due within N days (defaults
+  // to 7; includes overdue tasks).
+  app.get("/stats/care/due", async ({ event }) => {
+    const withinDays = parseCareWithinDays(event?.queryStringParameters?.withinDays);
+    const items = await listCareTasksDue(withinDays);
+    return jsonResponse(200, {
+      withinDays,
+      care_tasks: items.map(formatCareTask),
+    });
+  });
+
+  // GET /stats/pnl?period=&storePricePerDozen=&milkPricePerGallon=&meatPricePerLb=
+  // -- homestead profit & loss: costs (feed + health), outputs (egg/milk/meat
+  // value + actual sales), and net.
+  app.get("/stats/pnl", async ({ event }) => {
+    const period = resolvePeriodString(event);
+    const months = monthsForPeriod(period);
+    if (!months) throw new BadRequestError("period must be YYYY-MM or YYYY");
+    const options = {
+      storePricePerDozen: parseStorePrice(event),
+      milkPricePerGallon: parsePrice(event, "milkPricePerGallon"),
+      meatPricePerLb: parsePrice(event, "meatPricePerLb"),
+    };
+    return jsonResponse(200, await pnlStats(period, months, options));
   });
 
   // GET /stats/digest -- the on-demand weekly digest payload (the same shape
@@ -136,6 +224,18 @@ function parseFlock(event) {
 // back in the response).
 function resolvePeriodString(event) {
   return event?.queryStringParameters?.period ?? yyyymm();
+}
+
+// Parses a named non-negative price query param, or undefined when absent so
+// the domain layer falls back to its env default.
+function parsePrice(event, name) {
+  const raw = event?.queryStringParameters?.[name];
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new BadRequestError(`${name} must be a non-negative number`);
+  }
+  return parsed;
 }
 
 // Parses ?storePricePerDozen into a non-negative float, or undefined when

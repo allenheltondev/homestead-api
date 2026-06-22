@@ -229,6 +229,9 @@ describe("eggStats", () => {
       dozens: 0,
       days: 0,
       perDay: 0,
+      // Additive byBirdType breakdown (empty when no collections). The original
+      // top-level figures are unchanged.
+      byBirdType: [],
     });
   });
 });
