@@ -1,12 +1,22 @@
 import { ApiError } from '../auth/useApiFetch';
 import type { ApiFetch } from '../auth/useApiFetch';
 import type {
+  Bed,
+  BedListResponse,
+  CatalogCropsResponse,
+  CatalogVarietiesResponse,
+  CreateBedRequest,
   CreateGrnClaimRequest,
+  CreateGrowerCropRequest,
   GrnClaim,
   GrnDiscoverFilters,
   GrnDiscoverResponse,
   GrnListingsResponse,
   GrnRequestsResponse,
+  GrowerCrop,
+  GrowerCropListResponse,
+  UpdateBedRequest,
+  UpdateGrowerCropRequest,
 } from './types';
 
 // When the Good Roots Network integration isn't configured or the homestead
@@ -60,4 +70,87 @@ export async function createClaim(
 
 export async function getClaim(apiFetch: ApiFetch, id: string): Promise<GrnClaim> {
   return apiFetch<GrnClaim>(`/grn/claims/${id}`);
+}
+
+// --- Crop library (grower crops) ---------------------------------------
+// Managed in Good Roots through the homestead pass-through at /grn/crops.
+
+export async function listGrowerCrops(
+  apiFetch: ApiFetch,
+): Promise<GrowerCropListResponse> {
+  return apiFetch<GrowerCropListResponse>('/grn/crops');
+}
+
+export async function createGrowerCrop(
+  apiFetch: ApiFetch,
+  payload: CreateGrowerCropRequest,
+): Promise<GrowerCrop> {
+  return apiFetch<GrowerCrop>('/grn/crops', { method: 'POST', body: payload });
+}
+
+export async function getGrowerCrop(
+  apiFetch: ApiFetch,
+  id: string,
+): Promise<GrowerCrop> {
+  return apiFetch<GrowerCrop>(`/grn/crops/${id}`);
+}
+
+export async function updateGrowerCrop(
+  apiFetch: ApiFetch,
+  id: string,
+  payload: UpdateGrowerCropRequest,
+): Promise<GrowerCrop> {
+  return apiFetch<GrowerCrop>(`/grn/crops/${id}`, { method: 'PUT', body: payload });
+}
+
+export async function deleteGrowerCrop(apiFetch: ApiFetch, id: string): Promise<void> {
+  await apiFetch<void>(`/grn/crops/${id}`, { method: 'DELETE' });
+}
+
+// --- Shared catalog ----------------------------------------------------
+// Read-only reference data for the crop-library picker.
+
+export async function listCatalogCrops(
+  apiFetch: ApiFetch,
+): Promise<CatalogCropsResponse> {
+  return apiFetch<CatalogCropsResponse>('/grn/catalog/crops');
+}
+
+export async function listCatalogVarieties(
+  apiFetch: ApiFetch,
+  cropId: string,
+): Promise<CatalogVarietiesResponse> {
+  return apiFetch<CatalogVarietiesResponse>(
+    `/grn/catalog/crops/${cropId}/varieties`,
+  );
+}
+
+// --- Garden beds -------------------------------------------------------
+// Managed in Good Roots through the homestead pass-through at /grn/beds.
+
+export async function listBeds(apiFetch: ApiFetch): Promise<BedListResponse> {
+  return apiFetch<BedListResponse>('/grn/beds');
+}
+
+export async function createBed(
+  apiFetch: ApiFetch,
+  payload: CreateBedRequest,
+): Promise<Bed> {
+  return apiFetch<Bed>('/grn/beds', { method: 'POST', body: payload });
+}
+
+export async function getBed(apiFetch: ApiFetch, id: string): Promise<Bed> {
+  return apiFetch<Bed>(`/grn/beds/${id}`);
+}
+
+export async function updateBed(
+  apiFetch: ApiFetch,
+  id: string,
+  payload: UpdateBedRequest,
+): Promise<Bed> {
+  return apiFetch<Bed>(`/grn/beds/${id}`, { method: 'PUT', body: payload });
+}
+
+export async function deleteBed(apiFetch: ApiFetch, id: string): Promise<void> {
+  await apiFetch<void>(`/grn/beds/${id}`, { method: 'DELETE' });
 }

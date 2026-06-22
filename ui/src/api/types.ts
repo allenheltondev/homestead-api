@@ -806,6 +806,8 @@ export interface PnlStats {
 
 // A logged garden harvest. quantity is in `unit` (e.g. lb, count, bunch); crop
 // names the produce. cost (optional) lets the garden view compute cost/yield.
+// cropLibraryId links the harvest to a Good Roots grower-crop when one was
+// chosen from the crop library; cropName mirrors that crop's display name.
 export interface HarvestLog {
   id: string;
   crop: string;
@@ -817,6 +819,10 @@ export interface HarvestLog {
   cost: number | null;
   // Estimated market value of the harvest, when the backend can value it.
   value: number | null;
+  // Good Roots grower-crop linkage, when the harvest was logged against the
+  // GRN crop library rather than free text.
+  cropLibraryId: string | null;
+  cropName: string | null;
   // Set when this harvest's surplus has been shared to Good Roots.
   listing: GrnListing | null;
   createdAt: string;
@@ -828,6 +834,8 @@ export interface HarvestLogListResponse {
 
 // POST /harvest-logs — record a harvest. crop and quantity are required; unit
 // defaults server-side; date defaults to today; bedId/note/cost are optional.
+// cropLibraryId links the harvest to a Good Roots grower-crop (crop carries the
+// display name) when selected from the crop library.
 export interface CreateHarvestLogRequest {
   crop: string;
   quantity: number;
@@ -836,96 +844,13 @@ export interface CreateHarvestLogRequest {
   bedId?: string;
   note?: string;
   cost?: number;
+  cropLibraryId?: string;
 }
 
 export interface HarvestLogFilters {
   from?: string;
   to?: string;
   crop?: string;
-}
-
-// --- Garden: beds -------------------------------------------------------
-
-// A garden bed/plot. area (sq ft) is optional; location is a free-text label.
-export interface Bed {
-  id: string;
-  name: string;
-  area: number | null;
-  location: string | null;
-  notes: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface BedListResponse {
-  beds: Bed[];
-}
-
-export interface CreateBedRequest {
-  name: string;
-  area?: number;
-  location?: string;
-  notes?: string;
-}
-
-export interface UpdateBedRequest {
-  name?: string;
-  area?: number;
-  location?: string;
-  notes?: string;
-}
-
-// --- Garden: plantings --------------------------------------------------
-
-export type PlantingStatus = 'planned' | 'growing' | 'harvested' | 'failed';
-
-// A planting of a crop in a bed, with sow/transplant/harvest dates that drive
-// the planting-calendar view.
-export interface Planting {
-  id: string;
-  crop: string;
-  variety: string | null;
-  bedId: string | null;
-  status: PlantingStatus;
-  sowDate: string | null;
-  transplantDate: string | null;
-  expectedHarvestDate: string | null;
-  harvestDate: string | null;
-  note: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface PlantingListResponse {
-  plantings: Planting[];
-}
-
-export interface CreatePlantingRequest {
-  crop: string;
-  variety?: string;
-  bedId?: string;
-  status?: PlantingStatus;
-  sowDate?: string;
-  transplantDate?: string;
-  expectedHarvestDate?: string;
-  note?: string;
-}
-
-export interface UpdatePlantingRequest {
-  crop?: string;
-  variety?: string;
-  bedId?: string;
-  status?: PlantingStatus;
-  sowDate?: string;
-  transplantDate?: string;
-  expectedHarvestDate?: string;
-  harvestDate?: string;
-  note?: string;
-}
-
-export interface PlantingFilters {
-  bedId?: string;
-  status?: PlantingStatus;
 }
 
 // --- Garden: stats ------------------------------------------------------
@@ -948,23 +873,6 @@ export interface GardenStats {
   totalCost: number;
   totalValue: number;
   byCrop: HarvestByCropRow[];
-}
-
-// GET /garden/calendar — planting/harvest windows for a timeline view.
-export interface PlantingCalendarRow {
-  crop: string;
-  variety: string | null;
-  bedId: string | null;
-  status: PlantingStatus;
-  sowDate: string | null;
-  transplantDate: string | null;
-  expectedHarvestDate: string | null;
-  harvestDate: string | null;
-}
-
-export interface PlantingCalendar {
-  year: string;
-  plantings: PlantingCalendarRow[];
 }
 
 // --- Good Roots Network (GRN) ------------------------------------------
@@ -1050,4 +958,99 @@ export interface CreateGrnClaimRequest {
   listingId: string;
   quantity?: number;
   note?: string;
+}
+
+// --- Good Roots: crop library (grower crops) ---------------------------
+
+// A grower's crop in the Good Roots crop library, surfaced through the
+// homestead pass-through at /grn/crops. catalogCropId/catalogVarietyId link
+// the entry to the shared GRN catalog when chosen from the picker.
+export interface GrowerCrop {
+  id: string;
+  name: string;
+  variety: string | null;
+  category: string | null;
+  catalogCropId: string | null;
+  catalogVarietyId: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GrowerCropListResponse {
+  crops: GrowerCrop[];
+}
+
+export interface CreateGrowerCropRequest {
+  name: string;
+  variety?: string;
+  category?: string;
+  catalogCropId?: string;
+  catalogVarietyId?: string;
+  notes?: string;
+}
+
+export interface UpdateGrowerCropRequest {
+  name?: string;
+  variety?: string;
+  category?: string;
+  catalogCropId?: string;
+  catalogVarietyId?: string;
+  notes?: string;
+}
+
+// --- Good Roots: shared catalog ----------------------------------------
+
+// A crop in the shared Good Roots catalog, from GET /grn/catalog/crops.
+export interface CatalogCrop {
+  id: string;
+  name: string;
+  category: string | null;
+}
+
+export interface CatalogCropsResponse {
+  crops: CatalogCrop[];
+}
+
+// A variety of a catalog crop, from GET /grn/catalog/crops/{cropId}/varieties.
+export interface CatalogVariety {
+  id: string;
+  cropId: string;
+  name: string;
+}
+
+export interface CatalogVarietiesResponse {
+  varieties: CatalogVariety[];
+}
+
+// --- Good Roots: garden beds -------------------------------------------
+
+// A garden bed/plot managed in Good Roots via /grn/beds. area (sq ft) is
+// optional; location is a free-text label.
+export interface Bed {
+  id: string;
+  name: string;
+  area: number | null;
+  location: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BedListResponse {
+  beds: Bed[];
+}
+
+export interface CreateBedRequest {
+  name: string;
+  area?: number;
+  location?: string;
+  notes?: string;
+}
+
+export interface UpdateBedRequest {
+  name?: string;
+  area?: number;
+  location?: string;
+  notes?: string;
 }

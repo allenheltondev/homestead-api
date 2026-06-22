@@ -10,11 +10,12 @@ import {
   unpublishHarvestLog,
 } from '../api/harvest';
 import { getGardenStats } from '../api/garden';
-import { listBeds } from '../api/beds';
+import { listBeds, listGrowerCrops } from '../api/grn';
 import type {
   Bed,
   CreateHarvestLogRequest,
   GardenStats,
+  GrowerCrop,
   HarvestLog,
 } from '../api/types';
 import Modal from '../components/Modal';
@@ -30,6 +31,7 @@ export default function Garden(): ReactElement {
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<GardenStats | null>(null);
   const [beds, setBeds] = useState<Bed[]>([]);
+  const [crops, setCrops] = useState<GrowerCrop[]>([]);
 
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -62,13 +64,23 @@ export default function Garden(): ReactElement {
         if (!cancelled) setStats(null);
       });
 
-    // Best-effort: beds power the harvest form's bed picker.
+    // Best-effort: GRN beds power the harvest form's bed picker.
     listBeds(apiFetch)
       .then((res) => {
         if (!cancelled) setBeds(res.beds);
       })
       .catch(() => {
         if (!cancelled) setBeds([]);
+      });
+
+    // Best-effort: GRN crop library powers the harvest form's crop selector.
+    // When unavailable, the form falls back to free-text crop entry.
+    listGrowerCrops(apiFetch)
+      .then((res) => {
+        if (!cancelled) setCrops(res.crops);
+      })
+      .catch(() => {
+        if (!cancelled) setCrops([]);
       });
 
     return () => {
@@ -135,7 +147,7 @@ export default function Garden(): ReactElement {
         </div>
         <div className="flex items-center gap-2">
           <Link to="/beds" className="btn-secondary w-auto">
-            Beds &amp; plantings
+            Beds &amp; crops
           </Link>
           <button
             type="button"
@@ -335,6 +347,7 @@ export default function Garden(): ReactElement {
           busy={createBusy}
           serverError={createError}
           beds={beds}
+          crops={crops}
           onSubmit={(p) => void handleCreate(p)}
           onCancel={() => setCreateOpen(false)}
         />
