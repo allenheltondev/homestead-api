@@ -368,6 +368,12 @@ function PnlSummaryCard({ pnl }: { pnl: PnlStats }): ReactElement {
           <dt className="text-muted-foreground">Costs</dt>
           <dd className="font-medium text-warning-700">{formatMoney(pnl.totalCosts)}</dd>
         </div>
+        {pnl.produceValue != null && pnl.produceValue > 0 && (
+          <div>
+            <dt className="text-muted-foreground">Produce value</dt>
+            <dd className="font-medium text-success-700">{formatMoney(pnl.produceValue)}</dd>
+          </div>
+        )}
       </dl>
     </div>
   );

@@ -797,4 +797,257 @@ export interface PnlStats {
   net: number;
   costs: PnlLineRow[];
   revenue: PnlLineRow[];
+  // Optional estimated value of garden produce harvested in the period, when
+  // the backend can value harvests. Surfaced additively in the P&L view.
+  produceValue?: number;
+}
+
+// --- Garden: harvest logs ----------------------------------------------
+
+// A logged garden harvest. quantity is in `unit` (e.g. lb, count, bunch); crop
+// names the produce. cost (optional) lets the garden view compute cost/yield.
+export interface HarvestLog {
+  id: string;
+  crop: string;
+  quantity: number;
+  unit: string;
+  date: string;
+  bedId: string | null;
+  note: string | null;
+  cost: number | null;
+  // Estimated market value of the harvest, when the backend can value it.
+  value: number | null;
+  // Set when this harvest's surplus has been shared to Good Roots.
+  listing: GrnListing | null;
+  createdAt: string;
+}
+
+export interface HarvestLogListResponse {
+  harvest_logs: HarvestLog[];
+}
+
+// POST /harvest-logs — record a harvest. crop and quantity are required; unit
+// defaults server-side; date defaults to today; bedId/note/cost are optional.
+export interface CreateHarvestLogRequest {
+  crop: string;
+  quantity: number;
+  unit?: string;
+  date?: string;
+  bedId?: string;
+  note?: string;
+  cost?: number;
+}
+
+export interface HarvestLogFilters {
+  from?: string;
+  to?: string;
+  crop?: string;
+}
+
+// --- Garden: beds -------------------------------------------------------
+
+// A garden bed/plot. area (sq ft) is optional; location is a free-text label.
+export interface Bed {
+  id: string;
+  name: string;
+  area: number | null;
+  location: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BedListResponse {
+  beds: Bed[];
+}
+
+export interface CreateBedRequest {
+  name: string;
+  area?: number;
+  location?: string;
+  notes?: string;
+}
+
+export interface UpdateBedRequest {
+  name?: string;
+  area?: number;
+  location?: string;
+  notes?: string;
+}
+
+// --- Garden: plantings --------------------------------------------------
+
+export type PlantingStatus = 'planned' | 'growing' | 'harvested' | 'failed';
+
+// A planting of a crop in a bed, with sow/transplant/harvest dates that drive
+// the planting-calendar view.
+export interface Planting {
+  id: string;
+  crop: string;
+  variety: string | null;
+  bedId: string | null;
+  status: PlantingStatus;
+  sowDate: string | null;
+  transplantDate: string | null;
+  expectedHarvestDate: string | null;
+  harvestDate: string | null;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlantingListResponse {
+  plantings: Planting[];
+}
+
+export interface CreatePlantingRequest {
+  crop: string;
+  variety?: string;
+  bedId?: string;
+  status?: PlantingStatus;
+  sowDate?: string;
+  transplantDate?: string;
+  expectedHarvestDate?: string;
+  note?: string;
+}
+
+export interface UpdatePlantingRequest {
+  crop?: string;
+  variety?: string;
+  bedId?: string;
+  status?: PlantingStatus;
+  sowDate?: string;
+  transplantDate?: string;
+  expectedHarvestDate?: string;
+  harvestDate?: string;
+  note?: string;
+}
+
+export interface PlantingFilters {
+  bedId?: string;
+  status?: PlantingStatus;
+}
+
+// --- Garden: stats ------------------------------------------------------
+
+export interface HarvestByCropRow {
+  crop: string;
+  quantity: number;
+  unit: string;
+  harvests: number;
+  // Optional economics, present when harvest costs/values are logged.
+  cost?: number;
+  value?: number;
+}
+
+// GET /stats/garden?period= — garden output totals plus a per-crop breakdown
+// and (optional) cost/yield economics.
+export interface GardenStats {
+  period: string;
+  totalHarvests: number;
+  totalCost: number;
+  totalValue: number;
+  byCrop: HarvestByCropRow[];
+}
+
+// GET /garden/calendar — planting/harvest windows for a timeline view.
+export interface PlantingCalendarRow {
+  crop: string;
+  variety: string | null;
+  bedId: string | null;
+  status: PlantingStatus;
+  sowDate: string | null;
+  transplantDate: string | null;
+  expectedHarvestDate: string | null;
+  harvestDate: string | null;
+}
+
+export interface PlantingCalendar {
+  year: string;
+  plantings: PlantingCalendarRow[];
+}
+
+// --- Good Roots Network (GRN) ------------------------------------------
+
+export type GrnListingStatus = 'active' | 'claimed' | 'expired';
+
+// A surplus listing shared to the Good Roots community. Mirrors the share
+// created by POST /harvest-logs/{id}/publish.
+export interface GrnListing {
+  id: string;
+  harvestLogId: string | null;
+  crop: string;
+  quantity: number;
+  unit: string;
+  status: GrnListingStatus;
+  note: string | null;
+  // Present once someone claims the listing.
+  claimedBy: string | null;
+  claimId: string | null;
+  publishedAt: string;
+  expiresAt: string | null;
+}
+
+export interface GrnListingsResponse {
+  listings: GrnListing[];
+}
+
+// A community surplus offering discovered nearby, returned by GET /grn/discover.
+export interface GrnDiscoverItem {
+  id: string;
+  crop: string;
+  quantity: number;
+  unit: string;
+  note: string | null;
+  homestead: string | null;
+  distanceMiles: number | null;
+  lat: number | null;
+  lng: number | null;
+  publishedAt: string;
+}
+
+export interface GrnDiscoverResponse {
+  items: GrnDiscoverItem[];
+}
+
+export interface GrnDiscoverFilters {
+  lat: number;
+  lng: number;
+  radius: number;
+}
+
+// A community "need" — produce someone is requesting, from GET /grn/requests.
+export interface GrnRequest {
+  id: string;
+  crop: string;
+  quantity: number | null;
+  unit: string | null;
+  note: string | null;
+  homestead: string | null;
+  distanceMiles: number | null;
+  requestedAt: string;
+}
+
+export interface GrnRequestsResponse {
+  requests: GrnRequest[];
+}
+
+export type GrnClaimStatus = 'pending' | 'confirmed' | 'fulfilled' | 'cancelled';
+
+// A claim on a community listing, from POST/GET /grn/claims.
+export interface GrnClaim {
+  id: string;
+  listingId: string;
+  crop: string;
+  quantity: number | null;
+  unit: string | null;
+  status: GrnClaimStatus;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface CreateGrnClaimRequest {
+  listingId: string;
+  quantity?: number;
+  note?: string;
 }

@@ -17,6 +17,9 @@ import Milk from './routes/Milk';
 import Hatchery from './routes/Hatchery';
 import Care from './routes/Care';
 import Pnl from './routes/Pnl';
+import Garden from './routes/Garden';
+import Beds from './routes/Beds';
+import GoodRoots from './routes/GoodRoots';
 
 export const router = createBrowserRouter([
   {
@@ -51,6 +54,9 @@ export const router = createBrowserRouter([
       { path: 'hatchery', element: <Hatchery /> },
       { path: 'care', element: <Care /> },
       { path: 'health', element: <Health /> },
+      { path: 'garden', element: <Garden /> },
+      { path: 'beds', element: <Beds /> },
+      { path: 'good-roots', element: <GoodRoots /> },
       { path: 'pnl', element: <Pnl /> },
     ],
   },
