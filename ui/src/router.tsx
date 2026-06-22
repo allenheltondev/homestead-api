@@ -13,6 +13,10 @@ import PastureDetail from './routes/PastureDetail';
 import Feed from './routes/Feed';
 import Eggs from './routes/Eggs';
 import Health from './routes/Health';
+import Milk from './routes/Milk';
+import Hatchery from './routes/Hatchery';
+import Care from './routes/Care';
+import Pnl from './routes/Pnl';
 
 export const router = createBrowserRouter([
   {
@@ -43,7 +47,11 @@ export const router = createBrowserRouter([
       { path: 'pastures/:pastureId', element: <PastureDetail /> },
       { path: 'feed', element: <Feed /> },
       { path: 'eggs', element: <Eggs /> },
+      { path: 'milk', element: <Milk /> },
+      { path: 'hatchery', element: <Hatchery /> },
+      { path: 'care', element: <Care /> },
       { path: 'health', element: <Health /> },
+      { path: 'pnl', element: <Pnl /> },
     ],
   },
 ]);

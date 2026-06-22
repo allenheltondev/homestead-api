@@ -14,6 +14,7 @@ export async function listEggCollections(
     query: {
       from: filters.from,
       to: filters.to,
+      birdType: filters.birdType,
     },
   });
 }

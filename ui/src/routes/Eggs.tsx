@@ -85,6 +85,24 @@ export default function Eggs(): ReactElement {
     return { eggs, dozens: Math.round((eggs / 12) * 10) / 10, count: collections.length };
   }, [collections]);
 
+  // Per-bird-type breakdown derived from the (filtered) collections so it
+  // tracks the date range without needing a separate stats call.
+  const byBirdType = useMemo(() => {
+    if (!collections) return null;
+    const map = new Map<string, number>();
+    for (const c of collections) {
+      const key = c.birdType ?? 'Unspecified';
+      map.set(key, (map.get(key) ?? 0) + c.count);
+    }
+    return [...map.entries()]
+      .map(([birdType, eggs]) => ({
+        birdType,
+        eggs,
+        dozens: Math.round((eggs / 12) * 10) / 10,
+      }))
+      .sort((a, b) => b.eggs - a.eggs);
+  }, [collections]);
+
   const handleCreate = async (payload: CreateEggCollectionRequest): Promise<void> => {
     setCreateBusy(true);
     setCreateError(null);
@@ -155,6 +173,38 @@ export default function Eggs(): ReactElement {
       </div>
 
       <section className="space-y-3">
+        <h2 className="text-lg font-semibold text-foreground">Production by bird type</h2>
+        {byBirdType === null ? (
+          <p className="text-muted-foreground">Loading...</p>
+        ) : byBirdType.length === 0 ? (
+          <p className="rounded-md bg-muted text-muted-foreground text-sm text-center py-6">
+            No egg collections in this period.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Bird type</th>
+                  <th>Eggs</th>
+                  <th>Dozens</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byBirdType.map((r) => (
+                  <tr key={r.birdType}>
+                    <td className="font-medium text-foreground">{r.birdType}</td>
+                    <td>{r.eggs.toLocaleString()}</td>
+                    <td className="text-muted-foreground">{r.dozens.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-3">
         <h2 className="text-lg font-semibold text-foreground">Cost per dozen by flock</h2>
         {byFlock === null ? (
           <p className="rounded-md bg-muted text-muted-foreground text-sm text-center py-6">
@@ -222,6 +272,7 @@ export default function Eggs(): ReactElement {
               <tr>
                 <th>Collected</th>
                 <th>Count</th>
+                <th>Bird type</th>
                 <th>Coop</th>
                 <th />
               </tr>
@@ -231,6 +282,7 @@ export default function Eggs(): ReactElement {
                 <tr key={c.id}>
                   <td className="text-muted-foreground">{formatShortDate(c.date)}</td>
                   <td>{c.count}</td>
+                  <td className="text-muted-foreground">{c.birdType ?? '—'}</td>
                   <td className="text-muted-foreground">{c.coop ?? '—'}</td>
                   <td className="text-right">
                     <button
